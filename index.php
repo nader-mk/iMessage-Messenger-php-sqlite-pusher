@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 error_reporting(E_ALL);
 ini_set('display_errors', '0');
@@ -75,15 +76,17 @@ if (getenv('PUSHER_APP_ID') && getenv('PUSHER_KEY') && getenv('PUSHER_SECRET')) 
     }
 }
 
-function getPusher() {
+function getPusher()
+{
     global $pusher, $pusherEnabled;
     return $pusherEnabled ? $pusher : null;
 }
 
-function triggerPusherEvent(string $channel, string $event, array $data, ?string $socketId = null): bool {
+function triggerPusherEvent(string $channel, string $event, array $data, ?string $socketId = null): bool
+{
     $pusher = getPusher();
     if (!$pusher) return false;
-    
+
     try {
         $pusher->trigger($channel, $event, $data, $socketId);
         return true;
@@ -93,7 +96,8 @@ function triggerPusherEvent(string $channel, string $event, array $data, ?string
     }
 }
 
-function getDb(): PDO {
+function getDb(): PDO
+{
     static $pdo = null;
     if ($pdo === null) {
         $pdo = new PDO('sqlite:' . DB_PATH, null, null, [
@@ -112,7 +116,8 @@ function getDb(): PDO {
     return $pdo;
 }
 
-function safeExecute(PDOStatement $stmt, array $params = []): bool {
+function safeExecute(PDOStatement $stmt, array $params = []): bool
+{
     for ($i = 0; $i < 5; $i++) {
         try {
             $stmt->execute($params);
@@ -130,7 +135,8 @@ function safeExecute(PDOStatement $stmt, array $params = []): bool {
     return false;
 }
 
-function initDb(): void {
+function initDb(): void
+{
     $db = getDb();
     $db->exec("CREATE TABLE IF NOT EXISTS users(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -149,7 +155,8 @@ function initDb(): void {
     )");
     try {
         $db->exec("ALTER TABLE users ADD COLUMN last_active_at TEXT");
-    } catch (PDOException $e) {}
+    } catch (PDOException $e) {
+    }
     $db->exec("CREATE TABLE IF NOT EXISTS convos(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         type TEXT DEFAULT 'dm',
@@ -269,7 +276,7 @@ function initDb(): void {
     $db->exec("CREATE INDEX IF NOT EXISTS idx_convo_members_user ON convo_members(user_id)");
     $db->exec("CREATE INDEX IF NOT EXISTS idx_refresh_tokens_hash ON refresh_tokens(token_hash)");
     $db->exec("CREATE INDEX IF NOT EXISTS idx_refresh_tokens_family ON refresh_tokens(family_id)");
-    
+
     $db->exec("CREATE TABLE IF NOT EXISTS fonts(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT UNIQUE NOT NULL,
@@ -277,7 +284,7 @@ function initDb(): void {
         import_url TEXT,
         created_at TEXT DEFAULT (datetime('now'))
     )");
-    
+
     $fontCount = $db->query("SELECT COUNT(*) FROM fonts")->fetchColumn();
     if ($fontCount == 0) {
         $defaultFonts = [
@@ -290,7 +297,7 @@ function initDb(): void {
         $stmt = $db->prepare("INSERT INTO fonts(name, css_value, import_url) VALUES(?, ?, ?)");
         foreach ($defaultFonts as $f) $stmt->execute($f);
     }
-    
+
     $columns = $db->query("PRAGMA table_info(users)")->fetchAll();
     $columnNames = array_column($columns, 'name');
     if (!in_array('font_scale', $columnNames)) {
@@ -315,7 +322,8 @@ if (extension_loaded('sodium')) {
     define('CRYPTO_NONCE_BYTES', 12);
 }
 
-function getEncryptionKey(): string {
+function getEncryptionKey(): string
+{
     if (APP_KEY !== '') {
         $decoded = base64_decode(APP_KEY, true);
         if ($decoded !== false && strlen($decoded) === CRYPTO_KEY_BYTES) {
@@ -364,7 +372,8 @@ function getEncryptionKey(): string {
     }
 }
 
-function encryptMessage(string $plaintext): array {
+function encryptMessage(string $plaintext): array
+{
     $key = getEncryptionKey();
     $nonce = random_bytes(CRYPTO_NONCE_BYTES);
     if (USE_SODIUM) {
@@ -382,7 +391,8 @@ function encryptMessage(string $plaintext): array {
     return ['enc' => $ciphertext, 'nonce' => $nonce];
 }
 
-function decryptMessage(string $ciphertext, string $nonce): ?string {
+function decryptMessage(string $ciphertext, string $nonce): ?string
+{
     if (empty($ciphertext) || empty($nonce) || strlen($nonce) !== CRYPTO_NONCE_BYTES) {
         return null;
     }
@@ -407,15 +417,18 @@ function decryptMessage(string $ciphertext, string $nonce): ?string {
     return $plaintext !== false ? $plaintext : null;
 }
 
-function base64UrlEncode(string $data): string {
+function base64UrlEncode(string $data): string
+{
     return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
 }
 
-function base64UrlDecode(string $data): string {
+function base64UrlDecode(string $data): string
+{
     return base64_decode(strtr($data, '-_', '+/') . str_repeat('=', (4 - strlen($data) % 4) % 4));
 }
 
-function createJwt(array $payload): string {
+function createJwt(array $payload): string
+{
     $header = base64UrlEncode(json_encode(['alg' => 'HS256', 'typ' => 'JWT']));
     $payload['iat'] = $payload['iat'] ?? time();
     $payload['jti'] = $payload['jti'] ?? bin2hex(random_bytes(16));
@@ -424,7 +437,8 @@ function createJwt(array $payload): string {
     return "$header.$payloadEncoded.$signature";
 }
 
-function verifyJwt(string $token): ?array {
+function verifyJwt(string $token): ?array
+{
     $parts = explode('.', $token);
     if (count($parts) !== 3) return null;
     [$header, $payload, $signature] = $parts;
@@ -435,20 +449,21 @@ function verifyJwt(string $token): ?array {
     return $data;
 }
 
-function checkRateLimit(string $key, int $maxRequests = RATE_LIMIT_REQUESTS, int $window = RATE_LIMIT_WINDOW): bool {
+function checkRateLimit(string $key, int $maxRequests = RATE_LIMIT_REQUESTS, int $window = RATE_LIMIT_WINDOW): bool
+{
     try {
         $db = getDb();
         $now = time();
         $windowStart = $now - $window;
-        
+
         $db->exec("PRAGMA busy_timeout=250");
-        
+
         $stmt = $db->prepare("SELECT window_start, count FROM rate_limits WHERE key = ?");
         $stmt->execute([$key]);
         $row = $stmt->fetch();
-        
+
         $db->exec("PRAGMA busy_timeout=5000");
-        
+
         if (!$row || $row['window_start'] < $windowStart) {
             $db->prepare("INSERT OR REPLACE INTO rate_limits(key, window_start, count) VALUES(?, ?, 1)")->execute([$key, $now]);
             header("X-RateLimit-Limit: $maxRequests");
@@ -456,12 +471,12 @@ function checkRateLimit(string $key, int $maxRequests = RATE_LIMIT_REQUESTS, int
             header("X-RateLimit-Reset: " . ($now + $window));
             return true;
         }
-        
+
         $remaining = max(0, $maxRequests - $row['count'] - 1);
         header("X-RateLimit-Limit: $maxRequests");
         header("X-RateLimit-Remaining: $remaining");
         header("X-RateLimit-Reset: " . ($row['window_start'] + $window));
-        
+
         if ($row['count'] >= $maxRequests) return false;
         $db->prepare("UPDATE rate_limits SET count = count + 1 WHERE key = ?")->execute([$key]);
         return true;
@@ -471,26 +486,27 @@ function checkRateLimit(string $key, int $maxRequests = RATE_LIMIT_REQUESTS, int
     }
 }
 
-function checkRateLimitReadOnly(string $key, int $maxRequests = RATE_LIMIT_REQUESTS, int $window = RATE_LIMIT_WINDOW): bool {
+function checkRateLimitReadOnly(string $key, int $maxRequests = RATE_LIMIT_REQUESTS, int $window = RATE_LIMIT_WINDOW): bool
+{
     try {
         $db = getDb();
         $now = time();
         $windowStart = $now - $window;
-        
+
         $stmt = $db->prepare("SELECT window_start, count FROM rate_limits WHERE key = ?");
         $stmt->execute([$key]);
         $row = $stmt->fetch();
-        
+
         if (!$row || $row['window_start'] < $windowStart) return true;
         return $row['count'] < $maxRequests;
-        
     } catch (PDOException $e) {
         error_log("Rate limit (Read) bypassed due to lock: " . $e->getMessage());
         return true;
     }
 }
 
-function jsonResponse(array $data, int $code = 200): never {
+function jsonResponse(array $data, int $code = 200): never
+{
     http_response_code($code);
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
@@ -500,11 +516,13 @@ function jsonResponse(array $data, int $code = 200): never {
     exit;
 }
 
-function getClientIp(): string {
+function getClientIp(): string
+{
     return $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
 }
 
-function getAuthUser(): ?array {
+function getAuthUser(): ?array
+{
     $header = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
     if (!preg_match('/^Bearer\s+(.+)$/i', $header, $m)) return null;
     $payload = verifyJwt($m[1]);
@@ -517,30 +535,33 @@ function getAuthUser(): ?array {
     if (!$user) return null;
     if ($user['ban_until'] && strtotime($user['ban_until']) > time()) return null;
     if ($user['is_blocked']) return null;
-    
+
     try {
         $updateStmt = $db->prepare("UPDATE users SET last_active_at = datetime('now') WHERE id = ?");
         safeExecute($updateStmt, [$user['id']]);
     } catch (PDOException $e) {
         error_log('last_active_at update skipped due to lock: ' . $e->getMessage());
     }
-    
+
     return $user;
 }
 
-function requireAuth(): array {
+function requireAuth(): array
+{
     $user = getAuthUser();
     if (!$user) jsonResponse(['error' => 'Unauthorized'], 401);
     return $user;
 }
 
-function requireAdmin(): array {
+function requireAdmin(): array
+{
     $user = requireAuth();
     if (!$user['is_admin']) jsonResponse(['error' => 'Forbidden'], 403);
     return $user;
 }
 
-function checkBannedWords(string $text, int $userId): ?string {
+function checkBannedWords(string $text, int $userId): ?string
+{
     $db = getDb();
     $userStmt = $db->prepare("SELECT is_admin FROM users WHERE id = ?");
     $userStmt->execute([$userId]);
@@ -566,14 +587,15 @@ function checkBannedWords(string $text, int $userId): ?string {
                 $db->prepare("UPDATE users SET ban_until = ? WHERE id = ?")->execute([$expiresAt, $userId]);
             }
             $db->prepare("INSERT INTO admin_actions(admin_user_id, target_user_id, action_type, action_note, expires_at) VALUES(0, ?, ?, ?, ?)")
-               ->execute([$userId, $penalty, "Auto: banned word", $expiresAt]);
+                ->execute([$userId, $penalty, "Auto: banned word", $expiresAt]);
             return $penalty;
         }
     }
     return null;
 }
 
-function formatMessage(array $m, int $currentUserId): array {
+function formatMessage(array $m, int $currentUserId): array
+{
     $body = decryptMessage($m['body_enc'], $m['nonce']);
     return [
         'id' => (int)$m['id'],
@@ -589,7 +611,8 @@ function formatMessage(array $m, int $currentUserId): array {
     ];
 }
 
-function setRefreshTokenCookie(string $token, int $lifetime): void {
+function setRefreshTokenCookie(string $token, int $lifetime): void
+{
     $secure = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
     setcookie('refresh_token', $token, [
         'expires' => time() + $lifetime,
@@ -600,11 +623,13 @@ function setRefreshTokenCookie(string $token, int $lifetime): void {
     ]);
 }
 
-function clearRefreshTokenCookie(): void {
+function clearRefreshTokenCookie(): void
+{
     setcookie('refresh_token', '', ['expires' => 1, 'path' => '/', 'httponly' => true, 'samesite' => 'Strict']);
 }
 
-function getUserTheme(int $themeId): ?array {
+function getUserTheme(int $themeId): ?array
+{
     if (!$themeId) return null;
     $db = getDb();
     $stmt = $db->prepare("SELECT * FROM themes WHERE id = ? AND is_active = 1");
@@ -612,7 +637,8 @@ function getUserTheme(int $themeId): ?array {
     return $stmt->fetch() ?: null;
 }
 
-function getUserFont(int $fontId): ?array {
+function getUserFont(int $fontId): ?array
+{
     if (!$fontId) return null;
     $db = getDb();
     $stmt = $db->prepare("SELECT * FROM fonts WHERE id = ?");
@@ -620,7 +646,8 @@ function getUserFont(int $fontId): ?array {
     return $stmt->fetch() ?: null;
 }
 
-function issueNewTokens(array $user, string $familyId, string $ip): array {
+function issueNewTokens(array $user, string $familyId, string $ip): array
+{
     $db = getDb();
     $accessToken = createJwt([
         'type' => 'access',
@@ -632,12 +659,13 @@ function issueNewTokens(array $user, string $familyId, string $ip): array {
     $refreshHash = hash('sha256', $refreshToken);
     $expiresAt = gmdate('Y-m-d H:i:s', time() + REFRESH_TOKEN_LIFETIME);
     $db->prepare("INSERT INTO refresh_tokens(user_id, token_hash, family_id, expires_at, ip, ua) VALUES(?, ?, ?, ?, ?, ?)")
-       ->execute([$user['id'], $refreshHash, $familyId, $expiresAt, $ip, substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 255)]);
+        ->execute([$user['id'], $refreshHash, $familyId, $expiresAt, $ip, substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 255)]);
     setRefreshTokenCookie($refreshToken, REFRESH_TOKEN_LIFETIME);
     return ['access_token' => $accessToken, 'refresh_token' => $refreshToken];
 }
 
-function validateHttpMethod(string $actualMethod, array $allowedMethods): void {
+function validateHttpMethod(string $actualMethod, array $allowedMethods): void
+{
     if (!in_array($actualMethod, $allowedMethods)) {
         http_response_code(405);
         header('Allow: ' . implode(', ', $allowedMethods));
@@ -647,7 +675,8 @@ function validateHttpMethod(string $actualMethod, array $allowedMethods): void {
     }
 }
 
-function handleApi(): void {
+function handleApi(): void
+{
     $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
     $allowedOrigins = [$_SERVER['HTTP_HOST'] ?? '', 'http://localhost:8080', 'https://' . ($_SERVER['HTTP_HOST'] ?? '')];
     if (in_array($origin, $allowedOrigins) || !$origin) {
@@ -657,12 +686,12 @@ function handleApi(): void {
     header('Access-Control-Allow-Headers: Content-Type, Authorization');
     header('Access-Control-Allow-Credentials: true');
     header('Access-Control-Max-Age: 86400');
-    
+
     if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
         http_response_code(204);
         exit;
     }
-    
+
     $method = $_SERVER['REQUEST_METHOD'];
     $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
     $path = preg_replace('#^/index\.php#', '', $path);
@@ -672,7 +701,7 @@ function handleApi(): void {
         $input = json_decode($rawInput, true) ?? [];
     }
     $ip = getClientIp();
-    
+
     if ($path === '/api/poll' && $method === 'GET') {
         if (!checkRateLimitReadOnly("poll:$ip", RATE_LIMIT_POLL_REQUESTS, RATE_LIMIT_POLL_WINDOW)) {
             jsonResponse(['error' => 'Rate limit exceeded'], 429);
@@ -805,7 +834,7 @@ function handleApi(): void {
                 }
             }
             $db->prepare("UPDATE refresh_tokens SET revoked_at = datetime('now') WHERE family_id = ? AND revoked_at IS NULL")
-               ->execute([$row['family_id']]);
+                ->execute([$row['family_id']]);
             clearRefreshTokenCookie();
             jsonResponse(['error' => 'Token reuse detected'], 401);
         }
@@ -848,7 +877,7 @@ function handleApi(): void {
             $row = $stmt->fetch();
             if ($row) {
                 $db->prepare("UPDATE refresh_tokens SET revoked_at = datetime('now') WHERE family_id = ? AND revoked_at IS NULL")
-                   ->execute([$row['family_id']]);
+                    ->execute([$row['family_id']]);
             }
         }
         clearRefreshTokenCookie();
@@ -899,7 +928,7 @@ function handleApi(): void {
         $user = requireAuth();
         $fontId = (int)($input['font_id'] ?? 1);
         $db = getDb();
-        
+
         $stmt = $db->prepare("SELECT id FROM fonts WHERE id = ?");
         $stmt->execute([$fontId]);
         if (!$stmt->fetch()) {
@@ -1162,7 +1191,7 @@ function handleApi(): void {
         $stmt = $db->prepare("INSERT INTO messages(convo_id, user_id, body_enc, nonce) VALUES(?, ?, ?, ?)");
         $stmt->execute([$convoId, $user['id'], $enc['enc'], $enc['nonce']]);
         $messageId = (int)$db->lastInsertId();
-        
+
         triggerPusherEvent(
             "private-conversation-{$convoId}",
             'new-message',
@@ -1201,7 +1230,7 @@ function handleApi(): void {
             SELECT id, ? FROM messages WHERE convo_id = ? AND id <= ? AND user_id != ? AND deleted = 0
         ");
         $stmt->execute([$user['id'], $convoId, $upToMessageId, $user['id']]);
-        
+
         triggerPusherEvent(
             "private-conversation-{$convoId}",
             'message-read',
@@ -1266,12 +1295,12 @@ function handleApi(): void {
         $stmt = $db->prepare("SELECT id FROM messages WHERE convo_id = ? AND deleted = 1 AND id > ? LIMIT 100");
         $stmt->execute([$convoId, $lastId]);
         $deletedIds = array_map('intval', array_column($stmt->fetchAll(), 'id'));
-        
+
         $stmt = $db->prepare("SELECT u.last_active_at FROM convo_members cm JOIN users u ON cm.user_id = u.id WHERE cm.convo_id = ? AND cm.user_id != ? LIMIT 1");
         $stmt->execute([$convoId, $user['id']]);
         $partnerStatus = $stmt->fetch();
         $lastActive = $partnerStatus ? $partnerStatus['last_active_at'] : null;
-        
+
         jsonResponse(['messages' => $result, 'status_updates' => $statusUpdates, 'deleted_ids' => $deletedIds, 'partner_last_active' => $lastActive]);
     }
 
@@ -1283,7 +1312,7 @@ function handleApi(): void {
         if ($reportedUserId === (int)$user['id']) jsonResponse(['error' => 'Cannot report yourself'], 400);
         $db = getDb();
         $db->prepare("INSERT INTO reports(reporter_user_id, reported_user_id, reason) VALUES(?, ?, ?)")
-           ->execute([$user['id'], $reportedUserId, $reason]);
+            ->execute([$user['id'], $reportedUserId, $reason]);
         jsonResponse(['success' => true], 201);
     }
 
@@ -1337,7 +1366,7 @@ function handleApi(): void {
             $db->prepare("UPDATE users SET is_blocked = 1 WHERE id = ?")->execute([$report['reported_user_id']]);
         }
         $db->prepare("INSERT INTO admin_actions(admin_user_id, target_user_id, action_type, action_note, expires_at) VALUES(?, ?, ?, ?, ?)")
-           ->execute([$admin['id'], $report['reported_user_id'], $action, "From report #$reportId", $expiresAt]);
+            ->execute([$admin['id'], $report['reported_user_id'], $action, "From report #$reportId", $expiresAt]);
         $db->prepare("UPDATE reports SET status = 'actioned' WHERE id = ?")->execute([$reportId]);
         jsonResponse(['success' => true]);
     }
@@ -1363,7 +1392,7 @@ function handleApi(): void {
         if (!$word) jsonResponse(['error' => 'Word required'], 400);
         try {
             getDb()->prepare("INSERT INTO banned_words(word, penalty_type, penalty_duration, created_by_admin) VALUES(?, ?, ?, ?)")
-                   ->execute([$word, $penaltyType, $penaltyDuration ?: null, $admin['id']]);
+                ->execute([$word, $penaltyType, $penaltyDuration ?: null, $admin['id']]);
             jsonResponse(['success' => true], 201);
         } catch (PDOException $e) {
             jsonResponse(['error' => 'Word already exists'], 409);
@@ -1423,7 +1452,7 @@ function handleApi(): void {
         }
         try {
             getDb()->prepare("INSERT INTO themes(name, definition_json, created_by_admin) VALUES(?, ?, ?)")
-                   ->execute([$name, $definitionJson, $admin['id']]);
+                ->execute([$name, $definitionJson, $admin['id']]);
             jsonResponse(['success' => true, 'theme_id' => (int)getDb()->lastInsertId()], 201);
         } catch (PDOException $e) {
             jsonResponse(['error' => 'Theme name already exists'], 409);
@@ -1453,7 +1482,7 @@ function handleApi(): void {
     if ($path === '/api/admin/themes/delete' && $method === 'POST') {
         requireAdmin();
         $themeId = (int)($input['theme_id'] ?? 0);
-                $db = getDb();
+        $db = getDb();
         $db->prepare("UPDATE users SET theme_id = NULL WHERE theme_id = ?")->execute([$themeId]);
         $db->prepare("DELETE FROM themes WHERE id = ?")->execute([$themeId]);
         jsonResponse(['success' => true]);
@@ -1469,14 +1498,14 @@ function handleApi(): void {
         $name = trim($input['name'] ?? '');
         $cssValue = trim($input['css_value'] ?? '');
         $importUrl = trim($input['import_url'] ?? '');
-        
+
         if (!$name || !$cssValue) {
             jsonResponse(['error' => 'Name and CSS value required'], 400);
         }
-        
+
         try {
             getDb()->prepare("INSERT INTO fonts(name, css_value, import_url) VALUES(?, ?, ?)")
-                   ->execute([$name, $cssValue, $importUrl ?: null]);
+                ->execute([$name, $cssValue, $importUrl ?: null]);
             jsonResponse(['success' => true]);
         } catch (PDOException $e) {
             jsonResponse(['error' => 'Font name already exists'], 409);
@@ -1489,7 +1518,7 @@ function handleApi(): void {
         if ($fontId <= 1) {
             jsonResponse(['error' => 'Cannot delete default system font'], 400);
         }
-        
+
         $db = getDb();
         $db->prepare("UPDATE users SET font_id = 1 WHERE font_id = ?")->execute([$fontId]);
         $db->prepare("DELETE FROM fonts WHERE id = ?")->execute([$fontId]);
@@ -1536,7 +1565,7 @@ function handleApi(): void {
         if (!$title || !$body) jsonResponse(['error' => 'Title and body required'], 400);
         $db = getDb();
         $db->prepare("INSERT INTO support_messages(title, body, created_by_admin) VALUES(?, ?, ?)")
-           ->execute([$title, $body, $admin['id']]);
+            ->execute([$title, $body, $admin['id']]);
         jsonResponse(['success' => true, 'message_id' => (int)$db->lastInsertId()], 201);
     }
 
@@ -1551,26 +1580,26 @@ function handleApi(): void {
             validateHttpMethod($method, ['POST']);
             $db = getDb();
             $users = [];
-            
+
             $testUsers = [
                 ['username' => 'testuser1', 'password' => 'password123', 'is_admin' => 0],
                 ['username' => 'testuser2', 'password' => 'password123', 'is_admin' => 0],
                 ['username' => 'testadmin', 'password' => 'admin123', 'is_admin' => 1],
                 ['username' => 'banneduser', 'password' => 'password123', 'is_admin' => 0, 'banned' => true],
             ];
-            
+
             foreach ($testUsers as $userData) {
                 $hash = password_hash($userData['password'], PASSWORD_DEFAULT, ['cost' => 10]);
                 try {
                     $stmt = $db->prepare("INSERT INTO users(username, pass_hash, is_admin) VALUES(?, ?, ?)");
                     $stmt->execute([$userData['username'], $hash, $userData['is_admin']]);
                     $userId = $db->lastInsertId();
-                    
+
                     if (isset($userData['banned']) && $userData['banned']) {
                         $banUntil = gmdate('Y-m-d H:i:s', time() + 86400);
                         $db->prepare("UPDATE users SET ban_until = ? WHERE id = ?")->execute([$banUntil, $userId]);
                     }
-                    
+
                     $users[] = [
                         'id' => $userId,
                         'username' => $userData['username'],
@@ -1579,18 +1608,18 @@ function handleApi(): void {
                 } catch (PDOException $e) {
                 }
             }
-            
+
             jsonResponse([
                 'message' => 'Test data seeded',
                 'users' => $users,
                 'note' => 'All test users have password: password123 (except testadmin: admin123)'
             ], 201);
         }
-        
+
         if ($path === '/api/_test/reset') {
             validateHttpMethod($method, ['DELETE']);
             $db = getDb();
-            
+
             $db->exec("DELETE FROM messages");
             $db->exec("DELETE FROM convo_members");
             $db->exec("DELETE FROM convos");
@@ -1606,10 +1635,10 @@ function handleApi(): void {
             $db->exec("DELETE FROM message_reads");
             $db->exec("DELETE FROM users");
             $db->exec("DELETE FROM themes");
-            
+
             jsonResponse(['message' => 'Database reset complete'], 200);
         }
-        
+
         if ($path === '/api/_test/users') {
             validateHttpMethod($method, ['GET']);
             $users = getDb()->query("SELECT id, username, is_admin, is_verified, ban_until FROM users")->fetchAll();
@@ -1631,61 +1660,61 @@ function handleApi(): void {
         }
         jsonResponse($pusherConfig);
     }
-    
+
     if ($path === '/api/pusher/auth') {
         validateHttpMethod($method, ['POST']);
         $user = requireAuth();
-        
+
         $socketId = $_POST['socket_id'] ?? $input['socket_id'] ?? '';
         $channelName = $_POST['channel_name'] ?? $input['channel_name'] ?? '';
-        
+
         if (!$socketId || !$channelName) {
             jsonResponse(['error' => 'Missing socket_id or channel_name'], 400);
         }
-        
+
         if (!preg_match('/^private-conversation-(\d+)$/', $channelName, $matches)) {
             jsonResponse(['error' => 'Invalid channel name'], 403);
         }
-        
+
         $conversationId = (int)$matches[1];
-        
+
         $db = getDb();
         $stmt = $db->prepare("SELECT 1 FROM convo_members WHERE convo_id = ? AND user_id = ?");
         $stmt->execute([$conversationId, $user['id']]);
-        
+
         if (!$stmt->fetch()) {
             jsonResponse(['error' => 'Unauthorized'], 403);
         }
-        
+
         $pusher = getPusher();
         if (!$pusher) {
             jsonResponse(['error' => 'Pusher not configured'], 500);
         }
-        
+
         $auth = $pusher->socketAuth($channelName, $socketId);
-        
+
         header('Content-Type: application/json');
         echo $auth;
         exit;
     }
-    
+
     if ($path === '/api/pusher/typing') {
         validateHttpMethod($method, ['POST']);
         $user = requireAuth();
-        
+
         $conversationId = (int)($input['convo_id'] ?? $input['conversation_id'] ?? 0);
         if (!$conversationId) {
             jsonResponse(['error' => 'Missing conversation_id'], 400);
         }
-        
+
         $db = getDb();
         $stmt = $db->prepare("SELECT 1 FROM convo_members WHERE convo_id = ? AND user_id = ?");
         $stmt->execute([$conversationId, $user['id']]);
-        
+
         if (!$stmt->fetch()) {
             jsonResponse(['error' => 'Unauthorized'], 403);
         }
-        
+
         triggerPusherEvent(
             "private-conversation-{$conversationId}",
             'user-typing',
@@ -1695,7 +1724,7 @@ function handleApi(): void {
                 'convo_id' => $conversationId
             ]
         );
-        
+
         jsonResponse(['success' => true]);
     }
 
@@ -1728,2322 +1757,3802 @@ if (strpos($uri, '/api/') !== false) {
 }
 
 $nonce = base64_encode(random_bytes(16));
-header("Content-Security-Policy: default-src 'self'; script-src 'nonce-$nonce' 'unsafe-eval' https://unpkg.com https://js.pusher.com; style-src 'unsafe-inline' https:; font-src https: data:; img-src 'self' data:; connect-src 'self' wss://*.pusher.com https://sockjs.pusher.com https://*.pusher.com; frame-ancestors 'none'");
+header("Content-Security-Policy: default-src 'self'; script-src 'nonce-$nonce' 'unsafe-eval' https://cdn.jsdelivr.net https://js.pusher.com; style-src 'nonce-$nonce' 'unsafe-inline' https:; font-src https: data:; img-src 'self' data:; connect-src 'self' wss://*.pusher.com https://sockjs.pusher.com https://*.pusher.com; frame-ancestors 'none'");
 header("X-Content-Type-Options: nosniff");
 header("X-Frame-Options: DENY");
 ?>
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>Messages</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<style>
-:root {
-    --font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif;
-    --font-scale: 1;
-    --bg-primary: #000000;
-    --bg-secondary: rgba(28, 28, 30, 0.72);
-    --bg-tertiary: rgba(44, 44, 46, 0.65);
-    --glass-bg: rgba(30, 30, 32, 0.78);
-    --glass-border: rgba(255, 255, 255, 0.08);
-    --glass-blur: 20px;
-    --text-primary: #ffffff;
-    --text-secondary: rgba(255, 255, 255, 0.55);
-    --text-tertiary: rgba(255, 255, 255, 0.35);
-    --accent: #0A84FF;
-    --accent-gradient: linear-gradient(180deg, #3EA1FF 0%, #0A84FF 100%);
-    --bubble-incoming: rgba(58, 58, 60, 0.85);
-    --bubble-outgoing-start: #0A84FF;
-    --bubble-outgoing-end: #3EA1FF;
-    --separator: rgba(255, 255, 255, 0.06);
-    --radius-xs: 8px;
-    --radius-sm: 12px;
-    --radius-md: 18px;
-    --radius-lg: 22px;
-    --radius-xl: 28px;
-    --radius-full: 9999px;
-    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.15);
-    --shadow-md: 0 8px 32px rgba(0, 0, 0, 0.24);
-    --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.32);
-    --safe-top: env(safe-area-inset-top, 0px);
-    --safe-bottom: env(safe-area-inset-bottom, 0px);
-    --safe-left: env(safe-area-inset-left, 0px);
-    --safe-right: env(safe-area-inset-right, 0px);
-}
-
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-    -webkit-tap-highlight-color: transparent;
-    -webkit-touch-callout: none;
-}
-
-html, body {
-    height: 100%;
-    font-family: var(--font-family);
-    font-size: calc(16px * var(--font-scale));
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    overscroll-behavior: none;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-}
-
-[v-cloak] { display: none !important; }
-
-.app {
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    position: relative;
-    overflow: hidden;
-    background: 
-        radial-gradient(ellipse 80% 50% at 20% -20%, rgba(10, 132, 255, 0.15), transparent 50%),
-        radial-gradient(ellipse 60% 40% at 80% 10%, rgba(94, 92, 230, 0.12), transparent 50%),
-        radial-gradient(ellipse 100% 80% at 50% 100%, rgba(10, 132, 255, 0.08), transparent 40%),
-        var(--bg-primary);
-}
-
-.app::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
-    opacity: 0.02;
-    pointer-events: none;
-    z-index: 0;
-}
-
-.loading-screen {
-    position: fixed;
-    inset: 0;
-    background: var(--bg-primary);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 9999;
-}
-
-.loading-spinner {
-    width: 40px;
-    height: 40px;
-    border: 3px solid rgba(255, 255, 255, 0.1);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-    to { transform: rotate(360deg); }
-}
-
-.glass {
-    background: var(--glass-bg);
-    backdrop-filter: blur(var(--glass-blur)) saturate(180%);
-    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
-    border: 1px solid var(--glass-border);
-}
-
-.glass-light {
-    background: rgba(255, 255, 255, 0.06);
-    backdrop-filter: blur(16px) saturate(150%);
-    -webkit-backdrop-filter: blur(16px) saturate(150%);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.header {
-    position: sticky;
-    top: 0;
-    z-index: 100;
-    padding: calc(var(--safe-top) + 12px) 16px 12px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    background: rgba(0, 0, 0, 0.72);
-    backdrop-filter: blur(24px) saturate(180%);
-    -webkit-backdrop-filter: blur(24px) saturate(180%);
-    border-bottom: 1px solid var(--separator);
-}
-
-.header-title {
-    font-size: 28px;
-    font-weight: 700;
-    letter-spacing: -0.5px;
-}
-
-.header-actions {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.icon-btn {
-    width: 40px;
-    height: 40px;
-    border-radius: var(--radius-full);
-    border: none;
-    background: rgba(255, 255, 255, 0.08);
-    color: var(--text-primary);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: transform 0.15s ease, background 0.15s ease;
-    position: relative;
-}
-
-.icon-btn:hover {
-    background: rgba(255, 255, 255, 0.12);
-}
-
-.icon-btn:active {
-    transform: scale(0.92);
-}
-
-.icon-btn svg {
-    width: 20px;
-    height: 20px;
-}
-
-.icon-btn .badge {
-    position: absolute;
-    top: -2px;
-    right: -2px;
-    min-width: 18px;
-    height: 18px;
-    padding: 0 5px;
-    border-radius: var(--radius-full);
-    background: #FF453A;
-    font-size: 11px;
-    font-weight: 600;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.back-btn {
-    width: 36px;
-    height: 36px;
-    border-radius: var(--radius-full);
-    border: none;
-    background: rgba(255, 255, 255, 0.1);
-    color: var(--accent);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: transform 0.15s ease, background 0.15s ease;
-}
-
-.back-btn:active {
-    transform: scale(0.9);
-}
-
-.back-btn svg {
-    width: 20px;
-    height: 20px;
-}
-
-.content {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    position: relative;
-    z-index: 1;
-}
-
-.convo-list {
-    flex: 1;
-    overflow-y: auto;
-    overflow-x: hidden;
-    padding: 8px 12px calc(var(--safe-bottom) + 16px);
-    -webkit-overflow-scrolling: touch;
-}
-
-.convo-empty {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 60px 24px;
-    text-align: center;
-    color: var(--text-secondary);
-}
-
-.convo-empty svg {
-    width: 64px;
-    height: 64px;
-    margin-bottom: 16px;
-    opacity: 0.4;
-}
-
-.convo-empty p {
-    font-size: 17px;
-    font-weight: 500;
-}
-
-.convo-empty .hint {
-    font-size: 14px;
-    color: var(--text-tertiary);
-    margin-top: 8px;
-}
-
-.convo-item {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    padding: 14px;
-    border-radius: var(--radius-lg);
-    cursor: pointer;
-    transition: background 0.2s ease, transform 0.15s ease;
-    margin-bottom: 4px;
-}
-
-.convo-item:hover {
-    background: rgba(255, 255, 255, 0.04);
-}
-
-.convo-item:active {
-    transform: scale(0.98);
-    background: rgba(255, 255, 255, 0.06);
-}
-
-.convo-item.active {
-    background: rgba(10, 132, 255, 0.15);
-}
-
-.avatar {
-    width: 52px;
-    height: 52px;
-    border-radius: var(--radius-full);
-    background: linear-gradient(145deg, rgba(255, 255, 255, 0.15), rgba(255, 255, 255, 0.05));
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--text-primary);
-    flex-shrink: 0;
-    position: relative;
-    overflow: hidden;
-}
-
-.avatar::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.2) 0%, transparent 50%);
-    pointer-events: none;
-}
-
-.avatar-sm {
-    width: 40px;
-    height: 40px;
-    font-size: 16px;
-}
-
-.avatar-xs {
-    width: 28px;
-    height: 28px;
-    font-size: 12px;
-}
-
-.convo-info {
-    flex: 1;
-    min-width: 0;
-}
-
-.convo-name {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 17px;
-    font-weight: 600;
-    color: var(--text-primary);
-}
-
-.convo-name .verified {
-    color: var(--accent);
-    flex-shrink: 0;
-}
-
-.convo-name .verified svg {
-    width: 16px;
-    height: 16px;
-}
-
-.convo-preview {
-    font-size: 14px;
-    color: var(--text-secondary);
-    margin-top: 3px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.convo-meta {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 6px;
-}
-
-.convo-time {
-    font-size: 13px;
-    color: var(--text-tertiary);
-}
-
-.unread-badge {
-    min-width: 22px;
-    height: 22px;
-    padding: 0 7px;
-    border-radius: var(--radius-full);
-    background: var(--accent);
-    font-size: 13px;
-    font-weight: 600;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.chat-container {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-}
-
-.chat-header {
-    position: sticky;
-    top: 0;
-    z-index: 50;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: calc(var(--safe-top) + 10px) 12px 10px;
-    background: rgba(0, 0, 0, 0.75);
-    backdrop-filter: blur(24px) saturate(180%);
-    -webkit-backdrop-filter: blur(24px) saturate(180%);
-    border-bottom: 1px solid var(--separator);
-}
-
-.chat-header-info {
-    flex: 1;
-    min-width: 0;
-}
-
-.chat-header-name {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 17px;
-    font-weight: 600;
-}
-
-.chat-header-name .verified {
-    color: var(--accent);
-}
-
-.chat-header-name .verified svg {
-    width: 16px;
-    height: 16px;
-}
-
-.chat-header-status {
-    font-size: 13px;
-    color: var(--text-secondary);
-    margin-top: 2px;
-}
-
-.chat-header-status.online {
-    color: #30D158;
-}
-
-.chat-header-actions {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-}
-
-.chat-messages {
-    flex: 1;
-    overflow-y: auto;
-    overflow-x: hidden;
-    padding: 16px 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    -webkit-overflow-scrolling: touch;
-}
-
-.chat-empty {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-tertiary);
-    font-size: 15px;
-    text-align: center;
-    padding: 40px;
-}
-
-.message-row {
-    display: flex;
-    align-items: flex-end;
-    gap: 8px;
-    max-width: 85%;
-    animation: messageIn 0.25s ease-out;
-}
-
-@keyframes messageIn {
-    from {
-        opacity: 0;
-        transform: translateY(10px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-.message-row.incoming {
-    align-self: flex-start;
-}
-
-.message-row.outgoing {
-    align-self: flex-end;
-    flex-direction: row-reverse;
-}
-
-.message-avatar {
-    flex-shrink: 0;
-    margin-bottom: 2px;
-}
-
-.message-bubble {
-    padding: 10px 14px;
-    border-radius: var(--radius-md);
-    position: relative;
-    box-shadow: var(--shadow-sm);
-}
-
-.message-row.incoming .message-bubble {
-    background: var(--bubble-incoming);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-top-left-radius: var(--radius-xs);
-}
-
-.message-row.outgoing .message-bubble {
-    background: linear-gradient(180deg, var(--bubble-outgoing-end), var(--bubble-outgoing-start));
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-top-right-radius: var(--radius-xs);
-}
-
-.message-text {
-    font-size: calc(16px * var(--font-scale));
-    line-height: 1.4;
-    word-break: break-word;
-    white-space: pre-wrap;
-}
-
-.message-meta {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 5px;
-    margin-top: 4px;
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.55);
-}
-
-.message-row.outgoing .message-meta {
-    color: rgba(255, 255, 255, 0.7);
-}
-
-.message-status {
-    display: flex;
-    align-items: center;
-}
-
-.message-status svg {
-    width: 14px;
-    height: 14px;
-}
-
-.message-status.read svg {
-    color: #5AC8FA;
-}
-
-.typing-bubble {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 14px 18px;
-    background: var(--bubble-incoming);
-    border-radius: var(--radius-md);
-    border-top-left-radius: var(--radius-xs);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-}
-
-.typing-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.4);
-    animation: typingBounce 1.4s ease-in-out infinite;
-}
-
-.typing-dot:nth-child(2) { animation-delay: 0.2s; }
-.typing-dot:nth-child(3) { animation-delay: 0.4s; }
-
-@keyframes typingBounce {
-    0%, 60%, 100% { transform: translateY(0); }
-    30% { transform: translateY(-6px); }
-}
-
-.composer {
-    position: sticky;
-    bottom: 0;
-    z-index: 50;
-    padding: 10px 12px calc(var(--safe-bottom) + 10px);
-    background: rgba(0, 0, 0, 0.78);
-    backdrop-filter: blur(24px) saturate(180%);
-    -webkit-backdrop-filter: blur(24px) saturate(180%);
-    border-top: 1px solid var(--separator);
-}
-
-.composer-inner {
-    display: flex;
-    align-items: flex-end;
-    gap: 10px;
-}
-
-.composer-btn {
-    width: 36px;
-    height: 36px;
-    border-radius: var(--radius-full);
-    border: none;
-    background: rgba(255, 255, 255, 0.08);
-    color: var(--accent);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    flex-shrink: 0;
-    transition: transform 0.12s ease, background 0.15s ease;
-}
-
-.composer-btn:hover {
-    background: rgba(255, 255, 255, 0.12);
-}
-
-.composer-btn:active {
-    transform: scale(0.9);
-}
-
-.composer-btn svg {
-    width: 20px;
-    height: 20px;
-}
-
-.composer-input-wrapper {
-    flex: 1;
-    display: flex;
-    align-items: flex-end;
-    gap: 8px;
-    padding: 8px 14px;
-    border-radius: var(--radius-lg);
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-.composer-input-wrapper:focus-within {
-    border-color: rgba(10, 132, 255, 0.4);
-    box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.15);
-}
-
-.composer-input-wrapper .side-btn {
-    width: 28px;
-    height: 28px;
-    border-radius: var(--radius-full);
-    border: none;
-    background: transparent;
-    color: var(--text-secondary);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    flex-shrink: 0;
-    transition: color 0.15s ease;
-}
-
-.composer-input-wrapper .side-btn:hover {
-    color: var(--text-primary);
-}
-
-.composer-input-wrapper .side-btn svg {
-    width: 22px;
-    height: 22px;
-}
-
-.composer-input {
-    flex: 1;
-    border: none;
-    background: transparent;
-    color: var(--text-primary);
-    font-family: inherit;
-    font-size: 16px;
-    line-height: 1.4;
-    outline: none;
-    resize: none;
-    min-height: 24px;
-    max-height: 120px;
-}
-
-.composer-input::placeholder {
-    color: var(--text-tertiary);
-}
-
-.send-btn {
-    width: 36px;
-    height: 36px;
-    border-radius: var(--radius-full);
-    border: none;
-    background: var(--accent);
-    color: white;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    flex-shrink: 0;
-    transition: transform 0.12s ease, opacity 0.15s ease;
-}
-
-.send-btn:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-}
-
-.send-btn:not(:disabled):active {
-    transform: scale(0.9);
-}
-
-.send-btn svg {
-    width: 18px;
-    height: 18px;
-    margin-left: 2px;
-}
-
-.modal-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.6);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 24px;
-    z-index: 200;
-    animation: fadeIn 0.2s ease;
-}
-
-@keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-
-.modal {
-    width: 100%;
-    max-width: 380px;
-    border-radius: var(--radius-xl);
-    padding: 24px;
-    background: rgba(44, 44, 46, 0.92);
-    backdrop-filter: blur(40px) saturate(180%);
-    -webkit-backdrop-filter: blur(40px) saturate(180%);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: var(--shadow-lg);
-    animation: modalIn 0.25s ease-out;
-}
-
-@keyframes modalIn {
-    from {
-        opacity: 0;
-        transform: scale(0.95) translateY(10px);
-    }
-    to {
-        opacity: 1;
-        transform: scale(1) translateY(0);
-    }
-}
-
-.modal-title {
-    font-size: 20px;
-    font-weight: 700;
-    margin-bottom: 8px;
-}
-
-.modal-text {
-    font-size: 14px;
-    color: var(--text-secondary);
-    line-height: 1.5;
-    margin-bottom: 20px;
-}
-
-.modal-code {
-    padding: 14px;
-    border-radius: var(--radius-sm);
-    background: rgba(0, 0, 0, 0.3);
-    font-family: 'SF Mono', Monaco, monospace;
-    font-size: 12px;
-    word-break: break-all;
-    margin-bottom: 20px;
-    border: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.modal textarea,
-.modal input[type="text"],
-.modal input[type="password"] {
-    width: 100%;
-    padding: 14px 16px;
-    border-radius: var(--radius-sm);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    background: rgba(0, 0, 0, 0.25);
-    color: var(--text-primary);
-    font-family: inherit;
-    font-size: 16px;
-    outline: none;
-    margin-bottom: 12px;
-    transition: border-color 0.2s ease;
-}
-
-.modal textarea:focus,
-.modal input:focus {
-    border-color: var(--accent);
-}
-
-.modal textarea {
-    min-height: 100px;
-    resize: vertical;
-}
-
-.modal-actions {
-    display: flex;
-    gap: 10px;
-    justify-content: flex-end;
-}
-
-.btn {
-    padding: 12px 20px;
-    border-radius: var(--radius-sm);
-    border: none;
-    font-family: inherit;
-    font-size: 15px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: transform 0.12s ease, opacity 0.15s ease;
-}
-
-.btn:active {
-    transform: scale(0.97);
-}
-
-.btn-primary {
-    background: var(--accent);
-    color: white;
-}
-
-.btn-secondary {
-    background: rgba(255, 255, 255, 0.1);
-    color: var(--text-primary);
-}
-
-.btn-danger {
-    background: #FF453A;
-    color: white;
-}
-
-.panel {
-    position: fixed;
-    inset: 0;
-    z-index: 150;
-    background: var(--bg-primary);
-    display: flex;
-    flex-direction: column;
-    animation: slideUp 0.3s ease-out;
-}
-
-@keyframes slideUp {
-    from {
-        opacity: 0;
-        transform: translateY(100%);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-.panel-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: calc(var(--safe-top) + 14px) 16px 14px;
-    background: rgba(0, 0, 0, 0.75);
-    backdrop-filter: blur(24px) saturate(180%);
-    -webkit-backdrop-filter: blur(24px) saturate(180%);
-    border-bottom: 1px solid var(--separator);
-}
-
-.panel-header h2 {
-    font-size: 20px;
-    font-weight: 700;
-}
-
-.panel-content {
-    flex: 1;
-    overflow-y: auto;
-    padding: 16px;
-    padding-bottom: calc(var(--safe-bottom) + 24px);
-}
-
-.settings-section {
-    margin-bottom: 28px;
-}
-
-.settings-section h3 {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 12px;
-    padding-left: 4px;
-}
-
-.settings-card {
-    background: rgba(255, 255, 255, 0.04);
-    border-radius: var(--radius-md);
-    overflow: hidden;
-}
-
-.settings-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 14px 16px;
-    border-bottom: 1px solid var(--separator);
-}
-
-.settings-row:last-child {
-    border-bottom: none;
-}
-
-.settings-label {
-    font-size: 16px;
-    color: var(--text-primary);
-}
-
-.settings-control {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
-.font-scale-btn {
-    width: 34px;
-    height: 34px;
-    border-radius: var(--radius-full);
-    border: none;
-    background: rgba(255, 255, 255, 0.1);
-    color: var(--text-primary);
-    font-size: 18px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.15s ease;
-}
-
-.font-scale-btn:active {
-    background: rgba(255, 255, 255, 0.15);
-}
-
-.font-scale-value {
-    min-width: 50px;
-    text-align: center;
-    font-size: 15px;
-    color: var(--text-secondary);
-}
-
-.select-control {
-    padding: 10px 14px;
-    padding-right: 36px;
-    border-radius: var(--radius-sm);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    background: rgba(255, 255, 255, 0.06);
-    color: var(--text-primary);
-    font-family: inherit;
-    font-size: 15px;
-    outline: none;
-    appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='rgba(255,255,255,0.5)' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 12px center;
-    min-width: 140px;
-}
-
-.settings-preview {
-    padding: 16px;
-    background: rgba(0, 0, 0, 0.3);
-    border-radius: var(--radius-md);
-}
-
-.preview-bubble {
-    max-width: 80%;
-    padding: 10px 14px;
-    border-radius: var(--radius-md);
-    margin-bottom: 8px;
-}
-
-.preview-bubble.incoming {
-    background: var(--bubble-incoming);
-    border-top-left-radius: var(--radius-xs);
-}
-
-.preview-bubble.outgoing {
-    background: linear-gradient(180deg, var(--bubble-outgoing-end), var(--bubble-outgoing-start));
-    border-top-right-radius: var(--radius-xs);
-    margin-left: auto;
-}
-
-.verification-status {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 14px 16px;
-    background: rgba(48, 209, 88, 0.12);
-    border-radius: var(--radius-md);
-    color: #30D158;
-    font-weight: 500;
-}
-
-.verification-status svg {
-    width: 20px;
-    height: 20px;
-}
-
-.admin-tabs {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    margin-bottom: 20px;
-}
-
-.admin-tab {
-    padding: 10px 16px;
-    border-radius: var(--radius-sm);
-    border: none;
-    font-family: inherit;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.15s ease;
-}
-
-.admin-tab.active {
-    background: var(--accent);
-    color: white;
-}
-
-.admin-tab:not(.active) {
-    background: rgba(255, 255, 255, 0.08);
-    color: var(--text-secondary);
-}
-
-.admin-list {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-.admin-item {
-    padding: 14px;
-    border-radius: var(--radius-md);
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.admin-item-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 8px;
-}
-
-.admin-item-info {
-    font-size: 14px;
-    color: var(--text-secondary);
-}
-
-.admin-item-info strong {
-    color: var(--text-primary);
-}
-
-.status-badge {
-    padding: 4px 10px;
-    border-radius: var(--radius-full);
-    font-size: 12px;
-    font-weight: 600;
-    text-transform: capitalize;
-}
-
-.status-pending { background: rgba(255, 159, 10, 0.2); color: #FF9F0A; }
-.status-actioned { background: rgba(48, 209, 88, 0.2); color: #30D158; }
-.status-rejected { background: rgba(255, 69, 58, 0.2); color: #FF453A; }
-.status-approved { background: rgba(48, 209, 88, 0.2); color: #30D158; }
-
-.admin-item-reason {
-    font-size: 14px;
-    color: var(--text-primary);
-    line-height: 1.4;
-    margin-bottom: 12px;
-}
-
-.admin-item-actions {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-}
-
-.admin-item-actions button {
-    padding: 8px 14px;
-    border-radius: var(--radius-sm);
-    border: none;
-    font-family: inherit;
-    font-size: 13px;
-    font-weight: 600;
-    color: white;
-    cursor: pointer;
-    transition: opacity 0.15s ease;
-}
-
-.admin-item-actions button:hover {
-    opacity: 0.85;
-}
-
-.admin-form {
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-    margin-bottom: 20px;
-    padding: 16px;
-    background: rgba(255, 255, 255, 0.04);
-    border-radius: var(--radius-md);
-}
-
-.admin-form input,
-.admin-form select,
-.admin-form textarea {
-    padding: 12px 14px;
-    border-radius: var(--radius-sm);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    background: rgba(0, 0, 0, 0.25);
-    color: var(--text-primary);
-    font-family: inherit;
-    font-size: 14px;
-    outline: none;
-}
-
-.admin-form input:focus,
-.admin-form textarea:focus {
-    border-color: var(--accent);
-}
-
-.word-item,
-.theme-item,
-.user-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 14px;
-    border-radius: var(--radius-md);
-    background: rgba(255, 255, 255, 0.04);
-}
-
-.word-info {
-    flex: 1;
-}
-
-.word-penalty {
-    font-size: 12px;
-    color: var(--text-tertiary);
-    margin-left: 8px;
-}
-
-.theme-preview {
-    display: flex;
-    gap: 4px;
-    margin-right: 12px;
-}
-
-.theme-preview-dot {
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-}
-
-.theme-item-name {
-    font-weight: 500;
-}
-
-.theme-item-actions {
-    display: flex;
-    gap: 8px;
-}
-
-.user-badges {
-    display: flex;
-    gap: 6px;
-    margin-left: 10px;
-}
-
-.user-badge {
-    padding: 3px 8px;
-    border-radius: var(--radius-full);
-    font-size: 11px;
-    font-weight: 600;
-}
-
-.badge-admin { background: rgba(175, 82, 222, 0.2); color: #BF5AF2; }
-.badge-verified { background: rgba(10, 132, 255, 0.2); color: #0A84FF; }
-.badge-blocked { background: rgba(255, 69, 58, 0.2); color: #FF453A; }
-.badge-banned { background: rgba(255, 69, 58, 0.2); color: #FF453A; }
-.badge-muted { background: rgba(255, 159, 10, 0.2); color: #FF9F0A; }
-
-.support-item {
-    padding: 14px;
-    border-radius: var(--radius-md);
-    background: rgba(255, 255, 255, 0.04);
-    margin-bottom: 10px;
-    cursor: pointer;
-    transition: background 0.15s ease;
-}
-
-.support-item:hover {
-    background: rgba(255, 255, 255, 0.06);
-}
-
-.support-item.unread {
-    border-left: 3px solid var(--accent);
-}
-
-.support-item-title {
-    font-weight: 600;
-    margin-bottom: 4px;
-}
-
-.support-item-date {
-    font-size: 12px;
-    color: var(--text-tertiary);
-}
-
-.support-item-body {
-    margin-top: 12px;
-    padding-top: 12px;
-    border-top: 1px solid var(--separator);
-    font-size: 14px;
-    color: var(--text-secondary);
-    line-height: 1.5;
-}
-
-.unread-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--accent);
-    display: inline-block;
-    margin-right: 8px;
-}
-
-.toast {
-    position: fixed;
-    left: 50%;
-    bottom: calc(var(--safe-bottom) + 24px);
-    transform: translateX(-50%);
-    padding: 14px 20px;
-    border-radius: var(--radius-md);
-    background: rgba(50, 50, 52, 0.95);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: var(--shadow-lg);
-    font-size: 15px;
-    font-weight: 500;
-    z-index: 300;
-    max-width: calc(100% - 48px);
-    text-align: center;
-    animation: toastIn 0.3s ease-out;
-}
-
-@keyframes toastIn {
-    from {
-        opacity: 0;
-        transform: translateX(-50%) translateY(20px);
-    }
-    to {
-        opacity: 1;
-        transform: translateX(-50%) translateY(0);
-    }
-}
-
-.toast-success { border-color: rgba(48, 209, 88, 0.3); }
-.toast-error { border-color: rgba(255, 69, 58, 0.3); }
-.toast-info { border-color: rgba(10, 132, 255, 0.3); }
-
-.auth-container {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 24px;
-}
-
-.auth-box {
-    width: 100%;
-    max-width: 380px;
-}
-
-.auth-title {
-    font-size: 34px;
-    font-weight: 700;
-    text-align: center;
-    margin-bottom: 32px;
-    background: linear-gradient(135deg, #fff 0%, rgba(255,255,255,0.7) 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-}
-
-.auth-card {
-    padding: 24px;
-    border-radius: var(--radius-xl);
-    background: rgba(44, 44, 46, 0.65);
-    backdrop-filter: blur(40px) saturate(180%);
-    -webkit-backdrop-filter: blur(40px) saturate(180%);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.auth-tabs {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 20px;
-}
-
-.auth-tab {
-    flex: 1;
-    padding: 12px;
-    border-radius: var(--radius-sm);
-    border: none;
-    font-family: inherit;
-    font-size: 15px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.15s ease;
-    background: rgba(255, 255, 255, 0.06);
-    color: var(--text-secondary);
-}
-
-.auth-tab.active {
-    background: var(--accent);
-    color: white;
-}
-
-.auth-error {
-    padding: 12px;
-    border-radius: var(--radius-sm);
-    background: rgba(255, 69, 58, 0.15);
-    border: 1px solid rgba(255, 69, 58, 0.3);
-    color: #FF453A;
-    font-size: 14px;
-    margin-bottom: 16px;
-    text-align: center;
-}
-
-.auth-card .input {
-    width: 100%;
-    padding: 14px 16px;
-    border-radius: var(--radius-sm);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    background: rgba(0, 0, 0, 0.25);
-    color: var(--text-primary);
-    font-family: inherit;
-    font-size: 16px;
-    outline: none;
-    margin-bottom: 12px;
-    transition: border-color 0.2s ease;
-}
-
-.auth-card .input:focus {
-    border-color: var(--accent);
-}
-
-.auth-card .btn {
-    width: 100%;
-    margin-top: 8px;
-}
-
-@media (max-width: 480px) {
-    .header-title {
-        font-size: 24px;
-    }
-    
-    .chat-messages {
-        padding: 12px 10px;
-    }
-    
-    .message-row {
-        max-width: 90%;
-    }
-}
-</style>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="format-detection" content="telephone=no">
+    <title>Messenger</title>
+    <style nonce="<?php echo $nonce; ?>">
+        /* ========================================
+   CSS RESET & BASE - ES5/Legacy Compatible
+   ======================================== */
+        *,
+        *:before,
+        *:after {
+            -webkit-box-sizing: border-box;
+            -moz-box-sizing: border-box;
+            box-sizing: border-box;
+        }
+
+        html,
+        body,
+        div,
+        span,
+        h1,
+        h2,
+        h3,
+        p,
+        a,
+        img,
+        ul,
+        li,
+        form,
+        label,
+        input,
+        textarea,
+        button {
+            margin: 0;
+            padding: 0;
+            border: 0;
+            font-size: 100%;
+            font: inherit;
+            vertical-align: baseline;
+        }
+
+        ul {
+            list-style: none;
+        }
+
+        a {
+            text-decoration: none;
+            color: inherit;
+        }
+
+        button {
+            background: none;
+            cursor: pointer;
+        }
+
+        input,
+        textarea,
+        button {
+            outline: none;
+            font-family: inherit;
+        }
+
+        /* ========================================
+   CSS VARIABLES - Theme System Integration
+   ======================================== */
+        :root {
+            /* Messenger Lite Default Colors */
+            --bg: #FFFFFF;
+            --bg-secondary: #F2F3F5;
+            --text: #111827;
+            --text-secondary: #6B7280;
+            --text-tertiary: #9CA3AF;
+            --accent: #1877F2;
+            --accent-hover: #1664D9;
+            --divider: #E5E7EB;
+            --bubble-incoming: #F0F2F5;
+            --bubble-outgoing: #1877F2;
+            --online: #22C55E;
+            --danger: #EF4444;
+            --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            --font-scale: 1;
+
+            /* Safe areas for notched devices */
+            --safe-top: 0px;
+            --safe-bottom: 0px;
+        }
+
+        @supports (padding-top: env(safe-area-inset-top)) {
+            :root {
+                --safe-top: env(safe-area-inset-top);
+                --safe-bottom: env(safe-area-inset-bottom);
+            }
+        }
+
+        /* Theme variable mapping from admin system */
+        html.themed {
+            --bg: var(--app-bg-color, #FFFFFF);
+            --text: var(--app-text-color, #111827);
+            --accent: var(--app-accent-color, #1877F2);
+            --font: var(--app-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif);
+        }
+
+        /* ========================================
+   BASE STYLES
+   ======================================== */
+        html {
+            height: 100%;
+            -webkit-text-size-adjust: 100%;
+            -ms-text-size-adjust: 100%;
+        }
+
+        body {
+            height: 100%;
+            font-family: var(--font);
+            font-size: 16px;
+            line-height: 1.4;
+            color: var(--text);
+            background-color: var(--bg);
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            overflow: hidden;
+        }
+
+        /* Hide app until Vue loads */
+        [v-cloak] {
+            display: none !important;
+        }
+
+        /* ========================================
+   APP CONTAINER
+   ======================================== */
+        .app {
+            height: 100%;
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-orient: vertical;
+            -webkit-flex-direction: column;
+            -ms-flex-direction: column;
+            flex-direction: column;
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* ========================================
+   LOADING SCREEN
+   ======================================== */
+        .loading-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--bg);
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-align: center;
+            -webkit-align-items: center;
+            -ms-flex-align: center;
+            align-items: center;
+            -webkit-box-pack: center;
+            -webkit-justify-content: center;
+            -ms-flex-pack: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+
+        .loading-spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid var(--divider);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            -webkit-animation: spin 0.8s linear infinite;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @-webkit-keyframes spin {
+            to {
+                -webkit-transform: rotate(360deg);
+                transform: rotate(360deg);
+            }
+        }
+
+        @keyframes spin {
+            to {
+                -webkit-transform: rotate(360deg);
+                transform: rotate(360deg);
+            }
+        }
+
+        /* ========================================
+   HEADER - Messenger Lite Style
+   ======================================== */
+        .header {
+            height: 52px;
+            min-height: 52px;
+            padding-top: var(--safe-top);
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-align: center;
+            -webkit-align-items: center;
+            -ms-flex-align: center;
+            align-items: center;
+            -webkit-box-pack: justify;
+            -webkit-justify-content: space-between;
+            -ms-flex-pack: justify;
+            justify-content: space-between;
+            padding-left: 16px;
+            padding-right: 8px;
+            background: var(--bg);
+            border-bottom: 1px solid var(--divider);
+            position: relative;
+            z-index: 100;
+        }
+
+        .header-title {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--text);
+        }
+
+        .header-actions {
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-align: center;
+            -webkit-align-items: center;
+            -ms-flex-align: center;
+            align-items: center;
+            gap: 4px;
+        }
+
+        /* ========================================
+   ICON BUTTON
+   ======================================== */
+        .icon-btn {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-align: center;
+            -webkit-align-items: center;
+            -ms-flex-align: center;
+            align-items: center;
+            -webkit-box-pack: center;
+            -webkit-justify-content: center;
+            -ms-flex-pack: center;
+            justify-content: center;
+            color: var(--text);
+            background: transparent;
+            -webkit-transition: background 0.15s;
+            transition: background 0.15s;
+            position: relative;
+        }
+
+        .icon-btn:hover,
+        .icon-btn:active {
+            background: var(--bg-secondary);
+        }
+
+        .icon-btn svg {
+            width: 22px;
+            height: 22px;
+            fill: currentColor;
+        }
+
+        .icon-btn .badge {
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            min-width: 18px;
+            height: 18px;
+            padding: 0 5px;
+            border-radius: 9px;
+            background: var(--danger);
+            color: #fff;
+            font-size: 11px;
+            font-weight: 600;
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-align: center;
+            -webkit-align-items: center;
+            -ms-flex-align: center;
+            align-items: center;
+            -webkit-box-pack: center;
+            -webkit-justify-content: center;
+            -ms-flex-pack: center;
+            justify-content: center;
+        }
+
+        /* ========================================
+   SEARCH BAR
+   ======================================== */
+        .search-bar {
+            padding: 8px 16px;
+            background: var(--bg);
+        }
+
+        .search-input-wrap {
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-align: center;
+            -webkit-align-items: center;
+            -ms-flex-align: center;
+            align-items: center;
+            height: 36px;
+            padding: 0 12px;
+            background: var(--bg-secondary);
+            border-radius: 18px;
+        }
+
+        .search-input-wrap svg {
+            width: 16px;
+            height: 16px;
+            fill: var(--text-secondary);
+            margin-right: 8px;
+            -webkit-flex-shrink: 0;
+            -ms-flex-negative: 0;
+            flex-shrink: 0;
+        }
+
+        .search-input {
+            -webkit-box-flex: 1;
+            -webkit-flex: 1;
+            -ms-flex: 1;
+            flex: 1;
+            height: 100%;
+            background: transparent;
+            color: var(--text);
+            font-size: 15px;
+        }
+
+        .search-input::-webkit-input-placeholder {
+            color: var(--text-secondary);
+        }
+
+        .search-input::-moz-placeholder {
+            color: var(--text-secondary);
+        }
+
+        .search-input:-ms-input-placeholder {
+            color: var(--text-secondary);
+        }
+
+        .search-input::placeholder {
+            color: var(--text-secondary);
+        }
+
+        /* ========================================
+   ACTIVE NOW ROW
+   ======================================== */
+        .active-now {
+            padding: 12px 0;
+            border-bottom: 1px solid var(--divider);
+        }
+
+        .active-now-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            padding: 0 16px;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .active-now-scroll {
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            overflow-x: auto;
+            overflow-y: hidden;
+            padding: 0 12px;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+        }
+
+        .active-now-scroll::-webkit-scrollbar {
+            display: none;
+        }
+
+        .active-user {
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-orient: vertical;
+            -webkit-flex-direction: column;
+            -ms-flex-direction: column;
+            flex-direction: column;
+            -webkit-box-align: center;
+            -webkit-align-items: center;
+            -ms-flex-align: center;
+            align-items: center;
+            margin: 0 4px;
+            padding: 4px;
+            min-width: 64px;
+            cursor: pointer;
+        }
+
+        .active-user-avatar {
+            position: relative;
+            margin-bottom: 4px;
+        }
+
+        .active-user-name {
+            font-size: 12px;
+            color: var(--text-secondary);
+            max-width: 60px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            text-align: center;
+        }
+
+        /* ========================================
+   AVATAR
+   ======================================== */
+        .avatar {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-align: center;
+            -webkit-align-items: center;
+            -ms-flex-align: center;
+            align-items: center;
+            -webkit-box-pack: center;
+            -webkit-justify-content: center;
+            -ms-flex-pack: center;
+            justify-content: center;
+            color: #fff;
+            font-size: 18px;
+            font-weight: 600;
+            text-transform: uppercase;
+            -webkit-flex-shrink: 0;
+            -ms-flex-negative: 0;
+            flex-shrink: 0;
+            position: relative;
+        }
+
+        .avatar-sm {
+            width: 36px;
+            height: 36px;
+            font-size: 14px;
+        }
+
+        .avatar-md {
+            width: 44px;
+            height: 44px;
+            font-size: 16px;
+        }
+
+        .avatar-lg {
+            width: 56px;
+            height: 56px;
+            font-size: 20px;
+        }
+
+        .online-dot {
+            position: absolute;
+            bottom: 0;
+            right: 0;
+            width: 14px;
+            height: 14px;
+            background: var(--online);
+            border: 2px solid var(--bg);
+            border-radius: 50%;
+        }
+
+        .online-dot-sm {
+            width: 12px;
+            height: 12px;
+        }
+
+        /* ========================================
+   CONTENT AREA
+   ======================================== */
+        .content {
+            -webkit-box-flex: 1;
+            -webkit-flex: 1;
+            -ms-flex: 1;
+            flex: 1;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* ========================================
+   CHAT LIST
+   ======================================== */
+        .chat-list {
+            height: 100%;
+            overflow-y: auto;
+            overflow-x: hidden;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .chat-item {
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-align: center;
+            -webkit-align-items: center;
+            -ms-flex-align: center;
+            align-items: center;
+            padding: 10px 16px;
+            cursor: pointer;
+            -webkit-transition: background 0.15s;
+            transition: background 0.15s;
+        }
+
+        .chat-item:hover,
+        .chat-item:active {
+            background: var(--bg-secondary);
+        }
+
+        .chat-item.active {
+            background: #E7F3FF;
+        }
+
+        .chat-item.unread .chat-name {
+            font-weight: 700;
+        }
+
+        .chat-item.unread .chat-preview {
+            color: var(--text);
+            font-weight: 500;
+        }
+
+        .chat-avatar {
+            margin-right: 12px;
+        }
+
+        .chat-info {
+            -webkit-box-flex: 1;
+            -webkit-flex: 1;
+            -ms-flex: 1;
+            flex: 1;
+            min-width: 0;
+            margin-right: 8px;
+        }
+
+        .chat-name-row {
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-align: center;
+            -webkit-align-items: center;
+            -ms-flex-align: center;
+            align-items: center;
+            margin-bottom: 2px;
+        }
+
+        .chat-name {
+            font-size: 15px;
+            font-weight: 500;
+            color: var(--text);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .verified-badge {
+            margin-left: 4px;
+            color: var(--accent);
+            -webkit-flex-shrink: 0;
+            -ms-flex-negative: 0;
+            flex-shrink: 0;
+        }
+
+        .verified-badge svg {
+            width: 14px;
+            height: 14px;
+            fill: currentColor;
+        }
+
+        .chat-preview {
+            font-size: 14px;
+            color: var(--text-secondary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .chat-meta {
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-orient: vertical;
+            -webkit-flex-direction: column;
+            -ms-flex-direction: column;
+            flex-direction: column;
+            -webkit-box-align: end;
+            -webkit-align-items: flex-end;
+            -ms-flex-align: end;
+            align-items: flex-end;
+            -webkit-flex-shrink: 0;
+            -ms-flex-negative: 0;
+            flex-shrink: 0;
+        }
+
+        .chat-time {
+            font-size: 12px;
+            color: var(--text-tertiary);
+            margin-bottom: 4px;
+        }
+
+        .unread-badge {
+            min-width: 20px;
+            height: 20px;
+            padding: 0 6px;
+            border-radius: 10px;
+            background: var(--accent);
+            color: #fff;
+            font-size: 12px;
+            font-weight: 600;
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-align: center;
+            -webkit-align-items: center;
+            -ms-flex-align: center;
+            align-items: center;
+            -webkit-box-pack: center;
+            -webkit-justify-content: center;
+            -ms-flex-pack: center;
+            justify-content: center;
+        }
+
+        /* ========================================
+   EMPTY STATE
+   ======================================== */
+        .empty-state {
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-orient: vertical;
+            -webkit-flex-direction: column;
+            -ms-flex-direction: column;
+            flex-direction: column;
+            -webkit-box-align: center;
+            -webkit-align-items: center;
+            -ms-flex-align: center;
+            align-items: center;
+            -webkit-box-pack: center;
+            -webkit-justify-content: center;
+            -ms-flex-pack: center;
+            justify-content: center;
+            height: 100%;
+            padding: 40px 24px;
+            text-align: center;
+        }
+
+        .empty-state svg {
+            width: 64px;
+            height: 64px;
+            fill: var(--text-tertiary);
+            margin-bottom: 16px;
+        }
+
+        .empty-state-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text);
+            margin-bottom: 8px;
+        }
+
+        .empty-state-text {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        /* ========================================
+   FAB (Floating Action Button)
+   ======================================== */
+        .fab {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: var(--accent);
+            color: #fff;
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-align: center;
+            -webkit-align-items: center;
+            -ms-flex-align: center;
+            align-items: center;
+            -webkit-box-pack: center;
+            -webkit-justify-content: center;
+            -ms-flex-pack: center;
+            justify-content: center;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            -webkit-transition: background 0.15s, -webkit-transform 0.15s;
+            transition: background 0.15s, transform 0.15s;
+            z-index: 50;
+            padding-bottom: var(--safe-bottom);
+        }
+
+        .fab:hover {
+            background: var(--accent-hover);
+        }
+
+        .fab:active {
+            -webkit-transform: scale(0.95);
+            transform: scale(0.95);
+        }
+
+        .fab svg {
+            width: 24px;
+            height: 24px;
+            fill: currentColor;
+        }
+
+        /* ========================================
+   CHAT VIEW
+   ======================================== */
+        .chat-view {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--bg);
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-orient: vertical;
+            -webkit-flex-direction: column;
+            -ms-flex-direction: column;
+            flex-direction: column;
+            z-index: 200;
+        }
+
+        .chat-header {
+            height: 52px;
+            min-height: 52px;
+            padding-top: var(--safe-top);
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-align: center;
+            -webkit-align-items: center;
+            -ms-flex-align: center;
+            align-items: center;
+            padding-left: 4px;
+            padding-right: 8px;
+            background: var(--bg);
+            border-bottom: 1px solid var(--divider);
+        }
+
+        .back-btn {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-align: center;
+            -webkit-align-items: center;
+            -ms-flex-align: center;
+            align-items: center;
+            -webkit-box-pack: center;
+            -webkit-justify-content: center;
+            -ms-flex-pack: center;
+            justify-content: center;
+            color: var(--accent);
+            background: transparent;
+            margin-right: 4px;
+        }
+
+        .back-btn:active {
+            background: var(--bg-secondary);
+        }
+
+        .back-btn svg {
+            width: 24px;
+            height: 24px;
+            fill: currentColor;
+        }
+
+        .chat-header-info {
+            -webkit-box-flex: 1;
+            -webkit-flex: 1;
+            -ms-flex: 1;
+            flex: 1;
+            min-width: 0;
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-align: center;
+            -webkit-align-items: center;
+            -ms-flex-align: center;
+            align-items: center;
+        }
+
+        .chat-header-avatar {
+            margin-right: 10px;
+        }
+
+        .chat-header-text {
+            min-width: 0;
+        }
+
+        .chat-header-name {
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-align: center;
+            -webkit-align-items: center;
+            -ms-flex-align: center;
+            align-items: center;
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        .chat-header-status {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .chat-header-status.online {
+            color: var(--online);
+        }
+
+        /* ========================================
+   MESSAGES
+   ======================================== */
+        .messages-container {
+            -webkit-box-flex: 1;
+            -webkit-flex: 1;
+            -ms-flex: 1;
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding: 16px;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .message-row {
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            margin-bottom: 4px;
+        }
+
+        .message-row.incoming {
+            -webkit-box-pack: start;
+            -webkit-justify-content: flex-start;
+            -ms-flex-pack: start;
+            justify-content: flex-start;
+        }
+
+        .message-row.outgoing {
+            -webkit-box-pack: end;
+            -webkit-justify-content: flex-end;
+            -ms-flex-pack: end;
+            justify-content: flex-end;
+        }
+
+        .message-bubble {
+            max-width: 75%;
+            padding: 8px 12px;
+            border-radius: 18px;
+            word-wrap: break-word;
+            word-break: break-word;
+        }
+
+        .message-row.incoming .message-bubble {
+            background: var(--bubble-incoming);
+            color: var(--text);
+            border-bottom-left-radius: 4px;
+        }
+
+        .message-row.outgoing .message-bubble {
+            background: var(--bubble-outgoing);
+            color: #fff;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message-text {
+            font-size: 15px;
+            line-height: 1.35;
+            white-space: pre-wrap;
+        }
+
+        .message-time {
+            font-size: 11px;
+            margin-top: 4px;
+            text-align: right;
+        }
+
+        .message-row.incoming .message-time {
+            color: var(--text-tertiary);
+        }
+
+        .message-row.outgoing .message-time {
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .message-status {
+            display: -webkit-inline-box;
+            display: -webkit-inline-flex;
+            display: -ms-inline-flexbox;
+            display: inline-flex;
+            -webkit-box-align: center;
+            -webkit-align-items: center;
+            -ms-flex-align: center;
+            align-items: center;
+            margin-left: 4px;
+        }
+
+        .message-status svg {
+            width: 14px;
+            height: 14px;
+            fill: currentColor;
+        }
+
+        .message-status.read {
+            color: rgba(255, 255, 255, 0.9);
+        }
+
+        .message-status.delivered {
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        .message-status.sent {
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        /* Typing indicator */
+        .typing-indicator {
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-align: center;
+            -webkit-align-items: center;
+            -ms-flex-align: center;
+            align-items: center;
+            padding: 12px 16px;
+            background: var(--bubble-incoming);
+            border-radius: 18px;
+            border-bottom-left-radius: 4px;
+            max-width: 80px;
+        }
+
+        .typing-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--text-tertiary);
+            border-radius: 50%;
+            margin: 0 2px;
+            -webkit-animation: typingBounce 1.4s ease-in-out infinite;
+            animation: typingBounce 1.4s ease-in-out infinite;
+        }
+
+        .typing-dot:nth-child(2) {
+            -webkit-animation-delay: 0.2s;
+            animation-delay: 0.2s;
+        }
+
+        .typing-dot:nth-child(3) {
+            -webkit-animation-delay: 0.4s;
+            animation-delay: 0.4s;
+        }
+
+        @-webkit-keyframes typingBounce {
+
+            0%,
+            60%,
+            100% {
+                -webkit-transform: translateY(0);
+                transform: translateY(0);
+            }
+
+            30% {
+                -webkit-transform: translateY(-4px);
+                transform: translateY(-4px);
+            }
+        }
+
+        @keyframes typingBounce {
+
+            0%,
+            60%,
+            100% {
+                -webkit-transform: translateY(0);
+                transform: translateY(0);
+            }
+
+            30% {
+                -webkit-transform: translateY(-4px);
+                transform: translateY(-4px);
+            }
+        }
+
+        /* ========================================
+   COMPOSER
+   ======================================== */
+        .composer {
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-align: end;
+            -webkit-align-items: flex-end;
+            -ms-flex-align: end;
+            align-items: flex-end;
+            padding: 8px 12px;
+            padding-bottom: calc(8px + var(--safe-bottom));
+            background: var(--bg);
+            border-top: 1px solid var(--divider);
+            gap: 8px;
+        }
+
+        .composer-input-wrap {
+            -webkit-box-flex: 1;
+            -webkit-flex: 1;
+            -ms-flex: 1;
+            flex: 1;
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-align: end;
+            -webkit-align-items: flex-end;
+            -ms-flex-align: end;
+            align-items: flex-end;
+            min-height: 40px;
+            padding: 8px 16px;
+            background: var(--bg-secondary);
+            border-radius: 20px;
+        }
+
+        .composer-input {
+            -webkit-box-flex: 1;
+            -webkit-flex: 1;
+            -ms-flex: 1;
+            flex: 1;
+            max-height: 100px;
+            background: transparent;
+            color: var(--text);
+            font-size: 16px;
+            line-height: 1.35;
+            resize: none;
+            border: none;
+        }
+
+        .composer-input::-webkit-input-placeholder {
+            color: var(--text-secondary);
+        }
+
+        .composer-input::-moz-placeholder {
+            color: var(--text-secondary);
+        }
+
+        .composer-input:-ms-input-placeholder {
+            color: var(--text-secondary);
+        }
+
+        .composer-input::placeholder {
+            color: var(--text-secondary);
+        }
+
+        .send-btn {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: var(--accent);
+            color: #fff;
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-align: center;
+            -webkit-align-items: center;
+            -ms-flex-align: center;
+            align-items: center;
+            -webkit-box-pack: center;
+            -webkit-justify-content: center;
+            -ms-flex-pack: center;
+            justify-content: center;
+            -webkit-flex-shrink: 0;
+            -ms-flex-negative: 0;
+            flex-shrink: 0;
+            -webkit-transition: opacity 0.15s;
+            transition: opacity 0.15s;
+        }
+
+        .send-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .send-btn svg {
+            width: 20px;
+            height: 20px;
+            fill: currentColor;
+            margin-left: 2px;
+        }
+
+        /* ========================================
+   SETTINGS PANEL
+   ======================================== */
+        .panel {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--bg);
+            z-index: 300;
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-orient: vertical;
+            -webkit-flex-direction: column;
+            -ms-flex-direction: column;
+            flex-direction: column;
+        }
+
+        .panel-header {
+            height: 52px;
+            min-height: 52px;
+            padding-top: var(--safe-top);
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-align: center;
+            -webkit-align-items: center;
+            -ms-flex-align: center;
+            align-items: center;
+            -webkit-box-pack: justify;
+            -webkit-justify-content: space-between;
+            -ms-flex-pack: justify;
+            justify-content: space-between;
+            padding-left: 16px;
+            padding-right: 8px;
+            background: var(--bg);
+            border-bottom: 1px solid var(--divider);
+        }
+
+        .panel-title {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--text);
+        }
+
+        .panel-content {
+            -webkit-box-flex: 1;
+            -webkit-flex: 1;
+            -ms-flex: 1;
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            padding-bottom: calc(16px + var(--safe-bottom));
+            -webkit-overflow-scrolling: touch;
+        }
+
+        /* Settings sections */
+        .settings-section {
+            margin-bottom: 24px;
+        }
+
+        .settings-section-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 0 4px;
+            margin-bottom: 8px;
+        }
+
+        .settings-card {
+            background: var(--bg);
+            border: 1px solid var(--divider);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .settings-row {
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-align: center;
+            -webkit-align-items: center;
+            -ms-flex-align: center;
+            align-items: center;
+            -webkit-box-pack: justify;
+            -webkit-justify-content: space-between;
+            -ms-flex-pack: justify;
+            justify-content: space-between;
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--divider);
+        }
+
+        .settings-row:last-child {
+            border-bottom: none;
+        }
+
+        .settings-label {
+            font-size: 15px;
+            color: var(--text);
+        }
+
+        .settings-control {
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-align: center;
+            -webkit-align-items: center;
+            -ms-flex-align: center;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .font-scale-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: var(--bg-secondary);
+            color: var(--text);
+            font-size: 18px;
+            font-weight: 600;
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-align: center;
+            -webkit-align-items: center;
+            -ms-flex-align: center;
+            align-items: center;
+            -webkit-box-pack: center;
+            -webkit-justify-content: center;
+            -ms-flex-pack: center;
+            justify-content: center;
+        }
+
+        .font-scale-btn:active {
+            background: var(--divider);
+        }
+
+        .font-scale-value {
+            min-width: 50px;
+            text-align: center;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        .select-control {
+            padding: 8px 12px;
+            padding-right: 32px;
+            border-radius: 8px;
+            border: 1px solid var(--divider);
+            background: var(--bg);
+            color: var(--text);
+            font-size: 14px;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%236B7280' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 8px center;
+            min-width: 120px;
+        }
+
+        /* ========================================
+   AUTH SCREEN
+   ======================================== */
+        .auth-container {
+            -webkit-box-flex: 1;
+            -webkit-flex: 1;
+            -ms-flex: 1;
+            flex: 1;
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-align: center;
+            -webkit-align-items: center;
+            -ms-flex-align: center;
+            align-items: center;
+            -webkit-box-pack: center;
+            -webkit-justify-content: center;
+            -ms-flex-pack: center;
+            justify-content: center;
+            padding: 24px;
+        }
+
+        .auth-box {
+            width: 100%;
+            max-width: 360px;
+        }
+
+        .auth-logo {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .auth-logo svg {
+            width: 64px;
+            height: 64px;
+            fill: var(--accent);
+        }
+
+        .auth-title {
+            font-size: 28px;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 8px;
+            color: var(--text);
+        }
+
+        .auth-subtitle {
+            font-size: 14px;
+            text-align: center;
+            color: var(--text-secondary);
+            margin-bottom: 24px;
+        }
+
+        .auth-tabs {
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            margin-bottom: 20px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            padding: 4px;
+        }
+
+        .auth-tab {
+            -webkit-box-flex: 1;
+            -webkit-flex: 1;
+            -ms-flex: 1;
+            flex: 1;
+            padding: 10px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            background: transparent;
+            -webkit-transition: background 0.15s, color 0.15s;
+            transition: background 0.15s, color 0.15s;
+        }
+
+        .auth-tab.active {
+            background: var(--bg);
+            color: var(--text);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .auth-error {
+            padding: 12px;
+            border-radius: 8px;
+            background: #FEE2E2;
+            border: 1px solid #FECACA;
+            color: #DC2626;
+            font-size: 14px;
+            margin-bottom: 16px;
+            text-align: center;
+        }
+
+        .auth-form .input {
+            width: 100%;
+            height: 48px;
+            padding: 0 16px;
+            border-radius: 8px;
+            border: 1px solid var(--divider);
+            background: var(--bg);
+            color: var(--text);
+            font-size: 16px;
+            margin-bottom: 12px;
+            -webkit-transition: border-color 0.15s;
+            transition: border-color 0.15s;
+        }
+
+        .auth-form .input:focus {
+            border-color: var(--accent);
+        }
+
+        .auth-form .input::-webkit-input-placeholder {
+            color: var(--text-secondary);
+        }
+
+        .auth-form .input::-moz-placeholder {
+            color: var(--text-secondary);
+        }
+
+        .auth-form .input:-ms-input-placeholder {
+            color: var(--text-secondary);
+        }
+
+        .auth-form .input::placeholder {
+            color: var(--text-secondary);
+        }
+
+        /* ========================================
+   BUTTONS
+   ======================================== */
+        .btn {
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-align: center;
+            -webkit-align-items: center;
+            -ms-flex-align: center;
+            align-items: center;
+            -webkit-box-pack: center;
+            -webkit-justify-content: center;
+            -ms-flex-pack: center;
+            justify-content: center;
+            height: 48px;
+            padding: 0 24px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            -webkit-transition: background 0.15s, opacity 0.15s;
+            transition: background 0.15s, opacity 0.15s;
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: #fff;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: var(--accent-hover);
+        }
+
+        .btn-secondary {
+            background: var(--bg-secondary);
+            color: var(--text);
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: var(--divider);
+        }
+
+        .btn-danger {
+            background: var(--danger);
+            color: #fff;
+        }
+
+        .btn-block {
+            width: 100%;
+        }
+
+        /* ========================================
+   MODAL
+   ======================================== */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-align: center;
+            -webkit-align-items: center;
+            -ms-flex-align: center;
+            align-items: center;
+            -webkit-box-pack: center;
+            -webkit-justify-content: center;
+            -ms-flex-pack: center;
+            justify-content: center;
+            padding: 24px;
+            z-index: 400;
+        }
+
+        .modal {
+            width: 100%;
+            max-width: 360px;
+            background: var(--bg);
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+        }
+
+        .modal-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text);
+            margin-bottom: 8px;
+        }
+
+        .modal-text {
+            font-size: 14px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            margin-bottom: 16px;
+        }
+
+        .modal-code {
+            padding: 12px;
+            border-radius: 8px;
+            background: var(--bg-secondary);
+            font-family: monospace;
+            font-size: 12px;
+            word-break: break-all;
+            margin-bottom: 16px;
+            color: var(--text);
+        }
+
+        .modal textarea,
+        .modal input[type="text"],
+        .modal input[type="password"] {
+            width: 100%;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid var(--divider);
+            background: var(--bg);
+            color: var(--text);
+            font-size: 14px;
+            margin-bottom: 12px;
+        }
+
+        .modal textarea {
+            min-height: 80px;
+            resize: vertical;
+        }
+
+        .modal-actions {
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            gap: 8px;
+            -webkit-box-pack: end;
+            -webkit-justify-content: flex-end;
+            -ms-flex-pack: end;
+            justify-content: flex-end;
+        }
+
+        .modal-actions .btn {
+            height: 40px;
+            padding: 0 16px;
+            font-size: 14px;
+        }
+
+        /* ========================================
+   TOAST
+   ======================================== */
+        .toast {
+            position: fixed;
+            left: 50%;
+            bottom: 80px;
+            -webkit-transform: translateX(-50%);
+            transform: translateX(-50%);
+            padding: 12px 20px;
+            border-radius: 8px;
+            background: #333;
+            color: #fff;
+            font-size: 14px;
+            font-weight: 500;
+            z-index: 500;
+            max-width: 90%;
+            text-align: center;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+
+        .toast-success {
+            background: #059669;
+        }
+
+        .toast-error {
+            background: #DC2626;
+        }
+
+        .toast-info {
+            background: #2563EB;
+        }
+
+        /* ========================================
+   ADMIN PANEL
+   ======================================== */
+        .admin-tabs {
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            gap: 8px;
+            -webkit-flex-wrap: wrap;
+            -ms-flex-wrap: wrap;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+
+        .admin-tab {
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+        }
+
+        .admin-tab.active {
+            background: var(--accent);
+            color: #fff;
+        }
+
+        .admin-list {
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-orient: vertical;
+            -webkit-flex-direction: column;
+            -ms-flex-direction: column;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .admin-item {
+            padding: 14px;
+            border-radius: 10px;
+            background: var(--bg);
+            border: 1px solid var(--divider);
+        }
+
+        .admin-item-header {
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-box-align: center;
+            -webkit-align-items: center;
+            -ms-flex-align: center;
+            align-items: center;
+            -webkit-box-pack: justify;
+            -webkit-justify-content: space-between;
+            -ms-flex-pack: justify;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .status-badge {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .status-pending {
+            background: #FEF3C7;
+            color: #D97706;
+        }
+
+        .status-actioned {
+            background: #D1FAE5;
+            color: #059669;
+        }
+
+        .status-rejected {
+            background: #FEE2E2;
+            color: #DC2626;
+        }
+
+        .status-approved {
+            background: #D1FAE5;
+            color: #059669;
+        }
+
+        .admin-item-actions {
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            gap: 8px;
+            -webkit-flex-wrap: wrap;
+            -ms-flex-wrap: wrap;
+            flex-wrap: wrap;
+            margin-top: 12px;
+        }
+
+        .admin-item-actions button {
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            color: #fff;
+        }
+
+        .admin-form {
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            gap: 8px;
+            -webkit-flex-wrap: wrap;
+            -ms-flex-wrap: wrap;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+            padding: 16px;
+            background: var(--bg-secondary);
+            border-radius: 10px;
+        }
+
+        .admin-form input,
+        .admin-form select,
+        .admin-form textarea {
+            padding: 10px 12px;
+            border-radius: 6px;
+            border: 1px solid var(--divider);
+            background: var(--bg);
+            color: var(--text);
+            font-size: 14px;
+        }
+
+        /* ========================================
+   DESKTOP LAYOUT
+   ======================================== */
+        @media (min-width: 900px) {
+            .app-desktop {
+                -webkit-box-orient: horizontal;
+                -webkit-flex-direction: row;
+                -ms-flex-direction: row;
+                flex-direction: row;
+            }
+
+            .sidebar {
+                width: 360px;
+                min-width: 360px;
+                border-right: 1px solid var(--divider);
+                display: -webkit-box;
+                display: -webkit-flex;
+                display: -ms-flexbox;
+                display: flex;
+                -webkit-box-orient: vertical;
+                -webkit-flex-direction: column;
+                -ms-flex-direction: column;
+                flex-direction: column;
+                height: 100%;
+            }
+
+            .main-panel {
+                -webkit-box-flex: 1;
+                -webkit-flex: 1;
+                -ms-flex: 1;
+                flex: 1;
+                display: -webkit-box;
+                display: -webkit-flex;
+                display: -ms-flexbox;
+                display: flex;
+                -webkit-box-orient: vertical;
+                -webkit-flex-direction: column;
+                -ms-flex-direction: column;
+                flex-direction: column;
+            }
+
+            .desktop-placeholder {
+                -webkit-box-flex: 1;
+                -webkit-flex: 1;
+                -ms-flex: 1;
+                flex: 1;
+                display: -webkit-box;
+                display: -webkit-flex;
+                display: -ms-flexbox;
+                display: flex;
+                -webkit-box-align: center;
+                -webkit-align-items: center;
+                -ms-flex-align: center;
+                align-items: center;
+                -webkit-box-pack: center;
+                -webkit-justify-content: center;
+                -ms-flex-pack: center;
+                justify-content: center;
+                background: var(--bg-secondary);
+            }
+
+            .desktop-placeholder-text {
+                font-size: 18px;
+                color: var(--text-secondary);
+            }
+
+            .chat-view.desktop {
+                position: relative;
+                z-index: 1;
+            }
+        }
+    </style>
 </head>
+
 <body>
-<div id="app" class="app" v-cloak>
-    <div v-if="view === 'loading'" class="loading-screen">
-        <div class="loading-spinner"></div>
-    </div>
-    
-    <template v-else-if="view === 'auth'">
-        <div class="auth-container">
-            <div class="auth-box">
-                <h1 class="auth-title">Messages</h1>
-                <div class="auth-card">
-                    <div class="auth-tabs">
-                        <button class="auth-tab" :class="{ active: authTab === 'login' }" @click="authTab = 'login'; authError = ''">Sign In</button>
-                        <button class="auth-tab" :class="{ active: authTab === 'register' }" @click="authTab = 'register'; authError = ''">Create Account</button>
+    <div id="app" class="app" v-bind:class="{'app-desktop': isDesktop}" v-cloak>
+        <!-- Loading Screen -->
+        <div v-if="view === 'loading'" class="loading-screen">
+            <div class="loading-spinner"></div>
+        </div>
+
+        <!-- Auth Screen -->
+        <template v-if="view === 'auth'">
+            <div class="auth-container">
+                <div class="auth-box">
+                    <div class="auth-logo">
+                        <svg viewBox="0 0 48 48">
+                            <path d="M24 4C12.954 4 4 12.954 4 24c0 5.99 2.632 11.37 6.8 15.04V48l8.52-4.68c1.78.44 3.56.68 5.68.68 11.046 0 20-8.954 20-20S35.046 4 24 4zm2 27l-5.12-5.48L11 31l10.88-11.56L27.04 25 37 15L26 31z" />
+                        </svg>
                     </div>
+                    <h1 class="auth-title">Messenger</h1>
+                    <p class="auth-subtitle">Connect with friends instantly</p>
+
+                    <div class="auth-tabs">
+                        <button class="auth-tab" v-bind:class="{active: authTab === 'login'}" v-on:click="authTab = 'login'; authError = ''">Sign In</button>
+                        <button class="auth-tab" v-bind:class="{active: authTab === 'register'}" v-on:click="authTab = 'register'; authError = ''">Sign Up</button>
+                    </div>
+
                     <div v-if="authError" class="auth-error">{{ authError }}</div>
-                    <form @submit.prevent="handleAuth">
+
+                    <form class="auth-form" v-on:submit="handleAuth">
                         <input class="input" type="text" v-model="authForm.username" placeholder="Username" required minlength="3" maxlength="30" autocomplete="username">
                         <input class="input" type="password" v-model="authForm.password" placeholder="Password" required minlength="8" autocomplete="current-password">
-                        <button class="btn btn-primary" type="submit" :disabled="authLoading">
+                        <button class="btn btn-primary btn-block" type="submit" v-bind:disabled="authLoading">
                             {{ authLoading ? 'Please wait...' : (authTab === 'login' ? 'Sign In' : 'Create Account') }}
                         </button>
                     </form>
                 </div>
             </div>
-        </div>
-    </template>
-    
-    <template v-else-if="view === 'convos'">
-        <div class="header">
-            <h1 class="header-title">Messages</h1>
-            <div class="header-actions">
-                <button class="icon-btn" @click="openSupport" title="Support">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
-                    <span v-if="supportUnreadCount > 0" class="badge">{{ supportUnreadCount > 9 ? '9+' : supportUnreadCount }}</span>
-                </button>
-                <button class="icon-btn" @click="showSettingsPanel = true" title="Settings">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
-                </button>
-                <button v-if="user?.is_admin" class="icon-btn" @click="showAdminPanel = true" title="Admin">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
-                </button>
-                <button class="icon-btn" @click="createInvite" title="New Chat">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14m-7-7h14"/></svg>
-                </button>
-                <button class="icon-btn" @click="logout" title="Sign Out">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4m7 14l5-5-5-5m5 5H9"/></svg>
-                </button>
-            </div>
-        </div>
-        <div class="content">
-            <div class="convo-list">
-                <div v-if="convos.length === 0" class="convo-empty">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
-                    <p>No conversations yet</p>
-                    <p class="hint">Tap + to create an invite link</p>
-                </div>
-                <div v-for="c in convos" :key="c.id" class="convo-item" @click="openConvo(c)">
-                    <div class="avatar">{{ (c.other_username || 'U')[0].toUpperCase() }}</div>
-                    <div class="convo-info">
-                        <div class="convo-name">
-                            <span>{{ c.other_username || 'Waiting...' }}</span>
-                            <span v-if="c.other_verified" class="verified">
-                                <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
-                            </span>
+        </template>
+
+        <!-- Main App (Desktop Layout) -->
+        <template v-if="view !== 'loading' && view !== 'auth'">
+            <!-- Mobile: Single View -->
+            <template v-if="!isDesktop">
+                <!-- Chats List -->
+                <template v-if="view === 'chats'">
+                    <div class="header">
+                        <h1 class="header-title">Chats</h1>
+                        <div class="header-actions">
+                            <button class="icon-btn" v-on:click="openSupport" title="Support">
+                                <svg viewBox="0 0 24 24">
+                                    <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z" />
+                                </svg>
+                                <span v-if="supportUnreadCount > 0" class="badge">{{ supportUnreadCount > 9 ? '9+' : supportUnreadCount }}</span>
+                            </button>
+                            <button class="icon-btn" v-on:click="showSettingsPanel = true" title="Settings">
+                                <svg viewBox="0 0 24 24">
+                                    <path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22l-1.91 3.32c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.07.62-.07.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" />
+                                </svg>
+                            </button>
+                            <button v-if="user && user.is_admin" class="icon-btn" v-on:click="showAdminPanel = true" title="Admin">
+                                <svg viewBox="0 0 24 24">
+                                    <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z" />
+                                </svg>
+                            </button>
+                            <button class="icon-btn" v-on:click="logout" title="Sign Out">
+                                <svg viewBox="0 0 24 24">
+                                    <path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z" />
+                                </svg>
+                            </button>
                         </div>
-                        <div class="convo-preview">Tap to open</div>
                     </div>
-                    <div class="convo-meta">
-                        <span v-if="c.unread_count > 0" class="unread-badge">{{ c.unread_count > 99 ? '99+' : c.unread_count }}</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </template>
-    
-    <template v-else-if="view === 'chat'">
-        <div class="chat-container">
-            <div class="chat-header">
-                <button class="back-btn" @click="goBack">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 19l-7-7 7-7"/></svg>
-                </button>
-                <div class="avatar avatar-sm">{{ (currentConvo?.other_username || 'U')[0].toUpperCase() }}</div>
-                <div class="chat-header-info">
-                    <div class="chat-header-name">
-                        <span>{{ currentConvo?.other_username || 'Waiting...' }}</span>
-                        <span v-if="currentConvo?.other_verified" class="verified">
-                            <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
-                        </span>
-                    </div>
-                    <div v-if="typingIndicator" class="chat-header-status">{{ typingIndicator }}</div>
-                    <div v-else-if="activeStatus" class="chat-header-status" :class="{ online: activeStatus === 'Online' }">{{ activeStatus }}</div>
-                </div>
-                <div class="chat-header-actions">
-                    <button class="icon-btn" @click="showToast('Voice call coming soon', 'info')">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7A2 2 0 0122 16.92z"/></svg>
-                    </button>
-                    <button class="icon-btn" @click="showToast('Video call coming soon', 'info')">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
-                    </button>
-                    <button v-if="currentConvo?.other_user_id" class="icon-btn" @click="showReportModal = true">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
-                    </button>
-                </div>
-            </div>
-            
-            <div class="chat-messages" ref="messagesContainer">
-                <div v-if="messages.length === 0" class="chat-empty">
-                    Start the conversation!
-                </div>
-                <template v-for="(m, idx) in messages" :key="m.id">
-                    <div class="message-row" :class="m.is_mine ? 'outgoing' : 'incoming'">
-                        <div v-if="!m.is_mine && (idx === 0 || messages[idx-1]?.is_mine)" class="message-avatar">
-                            <div class="avatar avatar-xs">{{ (currentConvo?.other_username || 'U')[0].toUpperCase() }}</div>
+
+                    <div class="search-bar">
+                        <div class="search-input-wrap">
+                            <svg viewBox="0 0 24 24">
+                                <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
+                            </svg>
+                            <input class="search-input" type="text" v-model="searchQuery" placeholder="Search">
                         </div>
-                        <div v-else-if="!m.is_mine" class="message-avatar" style="width: 28px;"></div>
-                        <div class="message-bubble">
-                            <div class="message-text" :style="{ fontSize: `calc(16px * ${fontScale})` }">{{ m.body }}</div>
-                            <div class="message-meta">
-                                <span>{{ formatTime(m.created_at) }}</span>
-                                <span v-if="m.is_mine" class="message-status" :class="{ read: m.is_read_by_other }">
-                                    <svg v-if="m.is_read_by_other" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 7l-8 8-4-4"/><path d="M22 7l-8 8-1-1"/></svg>
-                                    <svg v-else-if="m.is_delivered" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 7l-8 8-4-4"/><path d="M22 7l-8 8-1-1" opacity="0.4"/></svg>
-                                    <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>
-                                </span>
+                    </div>
+
+                    <!-- Active Now -->
+                    <div v-if="activeUsers.length > 0" class="active-now">
+                        <div class="active-now-title">Active Now</div>
+                        <div class="active-now-scroll">
+                            <div v-for="u in activeUsers" v-bind:key="u.id" class="active-user" v-on:click="openConvoByUser(u)">
+                                <div class="active-user-avatar">
+                                    <div class="avatar avatar-md">{{ getInitial(u.username) }}</div>
+                                    <div class="online-dot online-dot-sm"></div>
+                                </div>
+                                <div class="active-user-name">{{ u.username }}</div>
                             </div>
                         </div>
                     </div>
+
+                    <div class="content">
+                        <div class="chat-list">
+                            <div v-if="filteredConvos.length === 0" class="empty-state">
+                                <svg viewBox="0 0 24 24">
+                                    <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z" />
+                                </svg>
+                                <div class="empty-state-title">No conversations yet</div>
+                                <div class="empty-state-text">Tap the button below to start chatting</div>
+                            </div>
+                            <div v-for="c in filteredConvos" v-bind:key="c.id" class="chat-item" v-bind:class="{unread: c.unread_count > 0}" v-on:click="openConvo(c)">
+                                <div class="chat-avatar">
+                                    <div class="avatar">{{ getInitial(c.other_username) }}
+                                        <div v-if="isUserOnline(c)" class="online-dot"></div>
+                                    </div>
+                                </div>
+                                <div class="chat-info">
+                                    <div class="chat-name-row">
+                                        <span class="chat-name">{{ c.other_username || 'Waiting...' }}</span>
+                                        <span v-if="c.other_verified" class="verified-badge">
+                                            <svg viewBox="0 0 24 24">
+                                                <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z" />
+                                            </svg>
+                                        </span>
+                                    </div>
+                                    <div class="chat-preview">Tap to open conversation</div>
+                                </div>
+                                <div class="chat-meta">
+                                    <div v-if="c.unread_count > 0" class="unread-badge">{{ c.unread_count > 99 ? '99+' : c.unread_count }}</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button class="fab" v-on:click="createInvite">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" />
+                        </svg>
+                    </button>
                 </template>
-                <div v-if="typingIndicator" class="message-row incoming">
-                    <div class="message-avatar">
-                        <div class="avatar avatar-xs">{{ (currentConvo?.other_username || 'U')[0].toUpperCase() }}</div>
-                    </div>
-                    <div class="typing-bubble">
-                        <div class="typing-dot"></div>
-                        <div class="typing-dot"></div>
-                        <div class="typing-dot"></div>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="composer">
-                <form class="composer-inner" @submit.prevent="sendMessage">
-                    <button type="button" class="composer-btn" @click="showToast('Attachments coming soon', 'info')">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14m-7-7h14"/></svg>
-                    </button>
-                    <div class="composer-input-wrapper">
-                        <button type="button" class="side-btn" @click="showToast('Camera coming soon', 'info')">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
+
+                <!-- Chat View Mobile -->
+                <div v-if="view === 'chat'" class="chat-view">
+                    <div class="chat-header">
+                        <button class="back-btn" v-on:click="goBack">
+                            <svg viewBox="0 0 24 24">
+                                <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" />
+                            </svg>
                         </button>
-                        <input type="text" class="composer-input" v-model="messageInput" placeholder="Aa" maxlength="2000" @input="handleTyping">
-                        <button type="button" class="side-btn" @click="showToast('Stickers coming soon', 'info')">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
-                        </button>
-                    </div>
-                    <button v-if="messageInput.trim()" type="submit" class="send-btn">
-                        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
-                    </button>
-                    <button v-else type="button" class="send-btn" @click="sendLike">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 9V5a3 3 0 00-3-3l-4 9v11h11.28a2 2 0 002-1.7l1.38-9a2 2 0 00-2-2.3zM7 22H4a2 2 0 01-2-2v-7a2 2 0 012-2h3"/></svg>
-                    </button>
-                </form>
-            </div>
-        </div>
-    </template>
-    
-    <div v-if="showInviteModal" class="modal-overlay" @click.self="showInviteModal = false">
-        <div class="modal">
-            <h2 class="modal-title">Invite Link</h2>
-            <p class="modal-text">Share this link to start a conversation. The link expires in 24 hours.</p>
-            <div class="modal-code">{{ inviteUrl }}</div>
-            <div class="modal-actions">
-                <button class="btn btn-secondary" @click="showInviteModal = false">Cancel</button>
-                <button class="btn btn-primary" @click="copyInvite">Copy Link</button>
-            </div>
-        </div>
-    </div>
-    
-    <div v-if="showReportModal" class="modal-overlay" @click.self="showReportModal = false">
-        <div class="modal">
-            <h2 class="modal-title">Report User</h2>
-            <p class="modal-text">Describe the issue. False reports may result in penalties.</p>
-            <textarea v-model="reportReason" placeholder="Describe the issue..." maxlength="1000"></textarea>
-            <div class="modal-actions">
-                <button class="btn btn-secondary" @click="showReportModal = false">Cancel</button>
-                <button class="btn btn-danger" @click="submitReport">Report</button>
-            </div>
-        </div>
-    </div>
-    
-    <div v-if="showSettingsPanel" class="panel">
-        <div class="panel-header">
-            <h2>Settings</h2>
-            <button class="icon-btn" @click="showSettingsPanel = false">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
-            </button>
-        </div>
-        <div class="panel-content">
-            <div class="settings-section">
-                <h3>Appearance</h3>
-                <div class="settings-card">
-                    <div class="settings-row">
-                        <span class="settings-label">Font Size</span>
-                        <div class="settings-control">
-                            <button class="font-scale-btn" @click="decreaseFontScale">−</button>
-                            <span class="font-scale-value">{{ Math.round(fontScale * 100) }}%</span>
-                            <button class="font-scale-btn" @click="increaseFontScale">+</button>
-                        </div>
-                    </div>
-                    <div class="settings-row">
-                        <span class="settings-label">Font</span>
-                        <select class="select-control" v-model="selectedFontId" @change="updateFont">
-                            <option v-for="f in availableFonts" :key="f.id" :value="f.id">{{ f.name }}</option>
-                        </select>
-                    </div>
-                    <div class="settings-row">
-                        <span class="settings-label">Theme</span>
-                        <select class="select-control" v-model="selectedThemeId" @change="updateTheme">
-                            <option :value="null">Default</option>
-                            <option v-for="t in availableThemes" :key="t.id" :value="t.id">{{ t.name }}</option>
-                        </select>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="settings-section">
-                <h3>Preview</h3>
-                <div class="settings-preview">
-                    <div class="preview-bubble incoming">
-                        <div :style="{ fontSize: `calc(16px * ${fontScale})` }">Hello! How are you?</div>
-                    </div>
-                    <div class="preview-bubble outgoing">
-                        <div :style="{ fontSize: `calc(16px * ${fontScale})` }">I'm doing great, thanks!</div>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="settings-section">
-                <h3>Verification</h3>
-                <div v-if="user?.is_verified" class="verification-status">
-                    <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
-                    Your account is verified
-                </div>
-                <div v-else class="settings-card">
-                    <div v-if="verificationRequestSent" style="padding: 16px; color: var(--text-secondary); text-align: center;">
-                        Verification request submitted. Please wait for review.
-                    </div>
-                    <div v-else style="padding: 16px;">
-                        <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 12px;">Request a verified badge for your account.</p>
-                        <textarea v-model="verificationMessage" placeholder="Why should you be verified?" maxlength="1000" style="width: 100%; min-height: 80px; margin-bottom: 12px; padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.25); color: white; font-family: inherit; font-size: 14px;"></textarea>
-                        <button class="btn btn-primary" style="width: 100%;" @click="requestVerification" :disabled="!verificationMessage.trim()">Request Verification</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <div v-if="showSupportPanel" class="panel">
-        <div class="panel-header">
-            <h2>Support</h2>
-            <button class="icon-btn" @click="showSupportPanel = false">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
-            </button>
-        </div>
-        <div class="panel-content">
-            <div v-if="supportMessages.length === 0" style="text-align: center; color: var(--text-tertiary); padding: 40px;">
-                No messages from support yet.
-            </div>
-            <div v-for="m in supportMessages" :key="m.id" class="support-item" :class="{ unread: !m.is_read }" @click="openSupportMessage(m)">
-                <div v-if="!m.is_read" class="unread-dot"></div>
-                <div class="support-item-title">{{ m.title }}</div>
-                <div class="support-item-date">{{ formatTime(m.created_at) }}</div>
-                <div v-if="expandedSupportId === m.id" class="support-item-body">{{ m.body }}</div>
-            </div>
-        </div>
-    </div>
-    
-    <div v-if="showAdminPanel" class="panel">
-        <div class="panel-header">
-            <h2>Admin</h2>
-            <button class="icon-btn" @click="showAdminPanel = false">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
-            </button>
-        </div>
-        <div class="panel-content">
-            <div class="admin-tabs">
-                <button class="admin-tab" :class="{ active: adminTab === 'reports' }" @click="adminTab = 'reports'; loadReports()">Reports</button>
-                <button class="admin-tab" :class="{ active: adminTab === 'verification' }" @click="adminTab = 'verification'; loadVerificationRequests()">Verification</button>
-                <button class="admin-tab" :class="{ active: adminTab === 'words' }" @click="adminTab = 'words'; loadBannedWords()">Words</button>
-                <button class="admin-tab" :class="{ active: adminTab === 'themes' }" @click="adminTab = 'themes'; loadAdminThemes()">Themes</button>
-                <button class="admin-tab" :class="{ active: adminTab === 'fonts' }" @click="adminTab = 'fonts'; loadAdminFonts()">Fonts</button>
-                <button class="admin-tab" :class="{ active: adminTab === 'support' }" @click="adminTab = 'support'; loadAdminSupport()">Support</button>
-                <button class="admin-tab" :class="{ active: adminTab === 'users' }" @click="adminTab = 'users'; loadUsers()">Users</button>
-            </div>
-            
-            <div v-if="adminTab === 'reports'">
-                <div class="admin-list">
-                    <div v-if="adminReports.length === 0" style="text-align: center; color: var(--text-tertiary); padding: 24px;">No reports</div>
-                    <div v-for="r in adminReports" :key="r.id" class="admin-item">
-                        <div class="admin-item-header">
-                            <div class="admin-item-info"><span>{{ r.reporter_username }}</span> → <strong>{{ r.reported_username }}</strong></div>
-                            <span class="status-badge" :class="'status-' + r.status">{{ r.status }}</span>
-                        </div>
-                        <div class="admin-item-reason">{{ r.reason }}</div>
-                        <div v-if="r.status === 'pending'" class="admin-item-actions">
-                            <button style="background: #FF9F0A;" @click="adminAction(r.id, 'mute', 3600)">Mute 1h</button>
-                            <button style="background: #FF6B35;" @click="adminAction(r.id, 'temp_ban', 86400)">Ban 24h</button>
-                            <button style="background: #FF453A;" @click="adminAction(r.id, 'perma_ban', 0)">Perma Ban</button>
-                            <button style="background: rgba(255,255,255,0.15);" @click="rejectReport(r.id)">Reject</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <div v-if="adminTab === 'verification'">
-                <div class="admin-list">
-                    <div v-if="verificationRequests.length === 0" style="text-align: center; color: var(--text-tertiary); padding: 24px;">No requests</div>
-                    <div v-for="r in verificationRequests" :key="r.id" class="admin-item">
-                        <div class="admin-item-header">
-                            <div class="admin-item-info"><strong>{{ r.username }}</strong></div>
-                            <span class="status-badge" :class="'status-' + r.status">{{ r.status }}</span>
-                        </div>
-                        <div class="admin-item-reason">{{ r.message }}</div>
-                        <div v-if="r.status === 'pending'" class="admin-item-actions">
-                            <button style="background: #30D158;" @click="approveVerification(r.id)">Approve</button>
-                            <button style="background: rgba(255,255,255,0.15);" @click="rejectVerification(r.id)">Reject</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <div v-if="adminTab === 'words'">
-                <div class="admin-form">
-                    <input type="text" v-model="newWord.word" placeholder="Word" style="flex: 1;">
-                    <select v-model="newWord.penalty_type">
-                        <option value="warn">Warn</option>
-                        <option value="mute">Mute</option>
-                        <option value="temp_ban">Temp Ban</option>
-                        <option value="perma_ban">Perma Ban</option>
-                    </select>
-                    <input type="number" v-model.number="newWord.penalty_duration" placeholder="Duration (sec)" style="width: 120px;">
-                    <button class="btn btn-primary" @click="addBannedWord">Add</button>
-                </div>
-                <div class="admin-list">
-                    <div v-for="w in bannedWords" :key="w.id" class="word-item">
-                        <div class="word-info">
-                            <span>{{ w.word }}</span>
-                            <span class="word-penalty">{{ w.penalty_type }}{{ w.penalty_duration ? ` (${w.penalty_duration}s)` : '' }}</span>
-                        </div>
-                        <button class="icon-btn" style="color: #FF453A; width: 32px; height: 32px;" @click="deleteBannedWord(w.id)">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
-                        </button>
-                    </div>
-                </div>
-            </div>
-            
-            <div v-if="adminTab === 'themes'">
-                <div class="admin-form" style="flex-direction: column;">
-                    <input type="text" v-model="newTheme.name" placeholder="Theme Name" style="width: 100%;">
-                    <textarea v-model="newTheme.definition_json" placeholder='{"background":"#000","header":"#111","incomingBubble":"#374151","outgoingBubble":"#0A84FF","accent":"#0A84FF"}' style="min-height: 80px; font-family: monospace; font-size: 12px;"></textarea>
-                    <button class="btn btn-primary" @click="createTheme">Create Theme</button>
-                </div>
-                <div class="admin-list" style="margin-top: 16px;">
-                    <div v-for="t in adminThemes" :key="t.id" class="theme-item">
-                        <div style="display: flex; align-items: center;">
-                            <div class="theme-preview" v-if="t.definition">
-                                <div class="theme-preview-dot" :style="{background: t.definition.background}"></div>
-                                <div class="theme-preview-dot" :style="{background: t.definition.header}"></div>
-                                <div class="theme-preview-dot" :style="{background: t.definition.accent}"></div>
+                        <div class="chat-header-info">
+                            <div class="chat-header-avatar">
+                                <div class="avatar avatar-sm">{{ getInitial(currentConvo ? currentConvo.other_username : '') }}</div>
                             </div>
-                            <span class="theme-item-name">{{ t.name }}</span>
-                            <span v-if="t.is_active" class="status-badge status-actioned" style="margin-left: 8px;">Active</span>
-                        </div>
-                        <div class="theme-item-actions">
-                            <button v-if="!t.is_active" class="btn btn-primary" style="padding: 6px 12px; font-size: 12px;" @click="activateTheme(t.id)">Activate</button>
-                            <button v-else class="btn btn-secondary" style="padding: 6px 12px; font-size: 12px;" @click="deactivateTheme(t.id)">Deactivate</button>
-                            <button class="btn btn-danger" style="padding: 6px 12px; font-size: 12px;" @click="deleteTheme(t.id)">Delete</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <div v-if="adminTab === 'fonts'">
-                <div class="admin-form" style="flex-direction: column;">
-                    <input type="text" v-model="newFont.name" placeholder="Font Name (e.g. Open Sans)" style="width: 100%;">
-                    <input type="text" v-model="newFont.css_value" placeholder="CSS Stack (e.g. 'Open Sans', sans-serif)" style="width: 100%;">
-                    <input type="text" v-model="newFont.import_url" placeholder="Import URL (optional)" style="width: 100%;">
-                    <button class="btn btn-primary" @click="createFont">Add Font</button>
-                </div>
-                <div class="admin-list" style="margin-top: 16px;">
-                    <div v-for="f in availableFonts" :key="f.id" class="word-item">
-                        <div class="word-info">
-                            <strong>{{ f.name }}</strong>
-                            <div style="font-size: 11px; color: var(--text-tertiary); margin-top: 2px;">{{ f.css_value }}</div>
-                        </div>
-                        <button v-if="f.id > 1" class="icon-btn" style="color: #FF453A; width: 32px; height: 32px;" @click="deleteFont(f.id)">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
-                        </button>
-                        <span v-else style="font-size: 11px; color: var(--text-tertiary);">Default</span>
-                    </div>
-                </div>
-            </div>
-            
-            <div v-if="adminTab === 'support'">
-                <div class="admin-form" style="flex-direction: column;">
-                    <input type="text" v-model="newSupportMessage.title" placeholder="Title" style="width: 100%;">
-                    <textarea v-model="newSupportMessage.body" placeholder="Message body..." style="min-height: 100px;"></textarea>
-                    <button class="btn btn-primary" @click="sendSupportMessage">Send to All Users</button>
-                </div>
-                <div class="admin-list" style="margin-top: 20px;">
-                    <div v-for="m in adminSupportMessages" :key="m.id" class="admin-item">
-                        <div class="admin-item-header">
-                            <strong>{{ m.title }}</strong>
-                            <span style="font-size: 12px; color: var(--text-tertiary);">{{ formatTime(m.created_at) }}</span>
-                        </div>
-                        <div class="admin-item-reason">{{ m.body }}</div>
-                    </div>
-                </div>
-            </div>
-            
-            <div v-if="adminTab === 'users'">
-                <div class="admin-list">
-                    <div v-for="u in adminUsers" :key="u.id" class="user-item">
-                        <div style="display: flex; align-items: center; flex: 1;">
-                            <span>{{ u.username }}</span>
-                            <div class="user-badges">
-                                <span v-if="u.is_admin" class="user-badge badge-admin">Admin</span>
-                                <span v-if="u.is_verified" class="user-badge badge-verified">Verified</span>
-                                <span v-if="u.is_blocked" class="user-badge badge-blocked">Blocked</span>
-                                <span v-if="u.ban_until && new Date(u.ban_until + 'Z') > new Date()" class="user-badge badge-banned">Banned</span>
-                                <span v-if="u.mute_until && new Date(u.mute_until + 'Z') > new Date()" class="user-badge badge-muted">Muted</span>
+                            <div class="chat-header-text">
+                                <div class="chat-header-name">
+                                    <span>{{ currentConvo ? currentConvo.other_username : 'Chat' }}</span>
+                                    <span v-if="currentConvo && currentConvo.other_verified" class="verified-badge">
+                                        <svg viewBox="0 0 24 24">
+                                            <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z" />
+                                        </svg>
+                                    </span>
+                                </div>
+                                <div v-if="typingIndicator" class="chat-header-status">{{ typingIndicator }}</div>
+                                <div v-else-if="activeStatus" class="chat-header-status" v-bind:class="{online: activeStatus === 'Online'}">{{ activeStatus }}</div>
                             </div>
                         </div>
-                        <button class="btn" :class="u.is_verified ? 'btn-secondary' : 'btn-primary'" style="padding: 6px 12px; font-size: 12px;" @click="toggleVerified(u)">
-                            {{ u.is_verified ? 'Unverify' : 'Verify' }}
+                        <button v-if="currentConvo && currentConvo.other_user_id" class="icon-btn" v-on:click="showReportModal = true">
+                            <svg viewBox="0 0 24 24">
+                                <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" />
+                            </svg>
                         </button>
+                    </div>
+
+                    <div class="messages-container" ref="messagesContainer">
+                        <div v-if="messages.length === 0" class="empty-state">
+                            <svg viewBox="0 0 24 24">
+                                <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z" />
+                            </svg>
+                            <div class="empty-state-title">Start the conversation!</div>
+                            <div class="empty-state-text">Send a message to begin</div>
+                        </div>
+                        <div v-for="m in messages" v-bind:key="m.id" class="message-row" v-bind:class="{outgoing: m.is_mine, incoming: !m.is_mine}">
+                            <div class="message-bubble">
+                                <div class="message-text" v-bind:style="{fontSize: fontSizePx}">{{ m.body }}</div>
+                                <div class="message-time">
+                                    {{ formatTime(m.created_at) }}
+                                    <span v-if="m.is_mine" class="message-status" v-bind:class="{read: m.is_read_by_other, delivered: m.is_delivered && !m.is_read_by_other, sent: !m.is_delivered}">
+                                        <svg v-if="m.is_read_by_other" viewBox="0 0 24 24">
+                                            <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z" />
+                                        </svg>
+                                        <svg v-else-if="m.is_delivered" viewBox="0 0 24 24">
+                                            <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41z" />
+                                        </svg>
+                                        <svg v-else viewBox="0 0 24 24">
+                                            <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
+                                        </svg>
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        <div v-if="typingIndicator" class="message-row incoming">
+                            <div class="typing-indicator">
+                                <div class="typing-dot"></div>
+                                <div class="typing-dot"></div>
+                                <div class="typing-dot"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <form class="composer" v-on:submit="sendMessage">
+                        <div class="composer-input-wrap">
+                            <input class="composer-input" type="text" v-model="messageInput" placeholder="Aa" maxlength="2000" v-on:input="handleTyping">
+                        </div>
+                        <button class="send-btn" type="submit" v-bind:disabled="!messageInput.trim()">
+                            <svg viewBox="0 0 24 24">
+                                <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+                            </svg>
+                        </button>
+                    </form>
+                </div>
+            </template>
+
+            <!-- Desktop: Two Column Layout -->
+            <template v-if="isDesktop">
+                <div class="sidebar">
+                    <div class="header">
+                        <h1 class="header-title">Chats</h1>
+                        <div class="header-actions">
+                            <button class="icon-btn" v-on:click="openSupport" title="Support">
+                                <svg viewBox="0 0 24 24">
+                                    <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z" />
+                                </svg>
+                                <span v-if="supportUnreadCount > 0" class="badge">{{ supportUnreadCount > 9 ? '9+' : supportUnreadCount }}</span>
+                            </button>
+                            <button class="icon-btn" v-on:click="showSettingsPanel = true" title="Settings">
+                                <svg viewBox="0 0 24 24">
+                                    <path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22l-1.91 3.32c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.07.62-.07.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" />
+                                </svg>
+                            </button>
+                            <button v-if="user && user.is_admin" class="icon-btn" v-on:click="showAdminPanel = true" title="Admin">
+                                <svg viewBox="0 0 24 24">
+                                    <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z" />
+                                </svg>
+                            </button>
+                            <button class="icon-btn" v-on:click="logout" title="Sign Out">
+                                <svg viewBox="0 0 24 24">
+                                    <path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="search-bar">
+                        <div class="search-input-wrap">
+                            <svg viewBox="0 0 24 24">
+                                <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
+                            </svg>
+                            <input class="search-input" type="text" v-model="searchQuery" placeholder="Search">
+                        </div>
+                    </div>
+
+                    <div class="content">
+                        <div class="chat-list">
+                            <div v-if="filteredConvos.length === 0" class="empty-state">
+                                <svg viewBox="0 0 24 24">
+                                    <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z" />
+                                </svg>
+                                <div class="empty-state-title">No conversations</div>
+                                <div class="empty-state-text">Create an invite to start</div>
+                            </div>
+                            <div v-for="c in filteredConvos" v-bind:key="c.id" class="chat-item" v-bind:class="{active: currentConvo && currentConvo.id === c.id, unread: c.unread_count > 0}" v-on:click="openConvo(c)">
+                                <div class="chat-avatar">
+                                    <div class="avatar">{{ getInitial(c.other_username) }}
+                                        <div v-if="isUserOnline(c)" class="online-dot"></div>
+                                    </div>
+                                </div>
+                                <div class="chat-info">
+                                    <div class="chat-name-row">
+                                        <span class="chat-name">{{ c.other_username || 'Waiting...' }}</span>
+                                        <span v-if="c.other_verified" class="verified-badge">
+                                            <svg viewBox="0 0 24 24">
+                                                <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z" />
+                                            </svg>
+                                        </span>
+                                    </div>
+                                    <div class="chat-preview">Tap to open conversation</div>
+                                </div>
+                                <div class="chat-meta">
+                                    <div v-if="c.unread_count > 0" class="unread-badge">{{ c.unread_count > 99 ? '99+' : c.unread_count }}</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button class="fab" v-on:click="createInvite" style="position: absolute; bottom: 24px; right: 24px;">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" />
+                        </svg>
+                    </button>
+                </div>
+
+                <div class="main-panel">
+                    <template v-if="currentConvo">
+                        <div class="chat-view desktop">
+                            <div class="chat-header">
+                                <div class="chat-header-info" style="padding-left: 12px;">
+                                    <div class="chat-header-avatar">
+                                        <div class="avatar avatar-sm">{{ getInitial(currentConvo.other_username) }}</div>
+                                    </div>
+                                    <div class="chat-header-text">
+                                        <div class="chat-header-name">
+                                            <span>{{ currentConvo.other_username || 'Chat' }}</span>
+                                            <span v-if="currentConvo.other_verified" class="verified-badge">
+                                                <svg viewBox="0 0 24 24">
+                                                    <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z" />
+                                                </svg>
+                                            </span>
+                                        </div>
+                                        <div v-if="typingIndicator" class="chat-header-status">{{ typingIndicator }}</div>
+                                        <div v-else-if="activeStatus" class="chat-header-status" v-bind:class="{online: activeStatus === 'Online'}">{{ activeStatus }}</div>
+                                    </div>
+                                </div>
+                                <button v-if="currentConvo.other_user_id" class="icon-btn" v-on:click="showReportModal = true">
+                                    <svg viewBox="0 0 24 24">
+                                        <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" />
+                                    </svg>
+                                </button>
+                            </div>
+
+                            <div class="messages-container" ref="messagesContainer">
+                                <div v-if="messages.length === 0" class="empty-state">
+                                    <svg viewBox="0 0 24 24">
+                                        <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z" />
+                                    </svg>
+                                    <div class="empty-state-title">Start the conversation!</div>
+                                    <div class="empty-state-text">Send a message to begin</div>
+                                </div>
+                                <div v-for="m in messages" v-bind:key="m.id" class="message-row" v-bind:class="{outgoing: m.is_mine, incoming: !m.is_mine}">
+                                    <div class="message-bubble">
+                                        <div class="message-text" v-bind:style="{fontSize: fontSizePx}">{{ m.body }}</div>
+                                        <div class="message-time">
+                                            {{ formatTime(m.created_at) }}
+                                            <span v-if="m.is_mine" class="message-status" v-bind:class="{read: m.is_read_by_other, delivered: m.is_delivered && !m.is_read_by_other, sent: !m.is_delivered}">
+                                                <svg v-if="m.is_read_by_other" viewBox="0 0 24 24">
+                                                    <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z" />
+                                                </svg>
+                                                <svg v-else-if="m.is_delivered" viewBox="0 0 24 24">
+                                                    <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41z" />
+                                                </svg>
+                                                <svg v-else viewBox="0 0 24 24">
+                                                    <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
+                                                </svg>
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div v-if="typingIndicator" class="message-row incoming">
+                                    <div class="typing-indicator">
+                                        <div class="typing-dot"></div>
+                                        <div class="typing-dot"></div>
+                                        <div class="typing-dot"></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <form class="composer" v-on:submit="sendMessage">
+                                <div class="composer-input-wrap">
+                                    <input class="composer-input" type="text" v-model="messageInput" placeholder="Aa" maxlength="2000" v-on:input="handleTyping">
+                                </div>
+                                <button class="send-btn" type="submit" v-bind:disabled="!messageInput.trim()">
+                                    <svg viewBox="0 0 24 24">
+                                        <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+                                    </svg>
+                                </button>
+                            </form>
+                        </div>
+                    </template>
+                    <template v-else>
+                        <div class="desktop-placeholder">
+                            <div class="desktop-placeholder-text">Select a chat to start messaging</div>
+                        </div>
+                    </template>
+                </div>
+            </template>
+        </template>
+
+        <!-- Invite Modal -->
+        <div v-if="showInviteModal" class="modal-overlay" v-on:click="closeInviteModal">
+            <div class="modal" v-on:click="stopProp">
+                <h2 class="modal-title">Invite Link</h2>
+                <p class="modal-text">Share this link to start a conversation. The link expires in 24 hours.</p>
+                <div class="modal-code">{{ inviteUrl }}</div>
+                <div class="modal-actions">
+                    <button class="btn btn-secondary" v-on:click="showInviteModal = false">Cancel</button>
+                    <button class="btn btn-primary" v-on:click="copyInvite">Copy Link</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Report Modal -->
+        <div v-if="showReportModal" class="modal-overlay" v-on:click="closeReportModal">
+            <div class="modal" v-on:click="stopProp">
+                <h2 class="modal-title">Report User</h2>
+                <p class="modal-text">Describe the issue. False reports may result in penalties.</p>
+                <textarea v-model="reportReason" placeholder="Describe the issue..." maxlength="1000"></textarea>
+                <div class="modal-actions">
+                    <button class="btn btn-secondary" v-on:click="showReportModal = false">Cancel</button>
+                    <button class="btn btn-danger" v-on:click="submitReport">Report</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Panel -->
+        <div v-if="showSettingsPanel" class="panel">
+            <div class="panel-header">
+                <h2 class="panel-title">Settings</h2>
+                <button class="icon-btn" v-on:click="showSettingsPanel = false">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+                    </svg>
+                </button>
+            </div>
+            <div class="panel-content">
+                <div class="settings-section">
+                    <div class="settings-section-title">Appearance</div>
+                    <div class="settings-card">
+                        <div class="settings-row">
+                            <span class="settings-label">Font Size</span>
+                            <div class="settings-control">
+                                <button class="font-scale-btn" v-on:click="decreaseFontScale">-</button>
+                                <span class="font-scale-value">{{ fontScalePercent }}%</span>
+                                <button class="font-scale-btn" v-on:click="increaseFontScale">+</button>
+                            </div>
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">Font</span>
+                            <select class="select-control" v-model="selectedFontId" v-on:change="updateFont">
+                                <option v-for="f in availableFonts" v-bind:key="f.id" v-bind:value="f.id">{{ f.name }}</option>
+                            </select>
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">Theme</span>
+                            <select class="select-control" v-model="selectedThemeId" v-on:change="updateTheme">
+                                <option v-bind:value="null">Default</option>
+                                <option v-for="t in availableThemes" v-bind:key="t.id" v-bind:value="t.id">{{ t.name }}</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <div class="settings-section-title">Account</div>
+                    <div class="settings-card">
+                        <div class="settings-row">
+                            <span class="settings-label">Username</span>
+                            <span style="color: var(--text-secondary);">{{ user ? user.username : '' }}</span>
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">Verified</span>
+                            <span v-if="user && user.is_verified" style="color: var(--accent);">Yes</span>
+                            <button v-else class="btn btn-secondary" style="height: 32px; padding: 0 12px; font-size: 13px;" v-on:click="requestVerification">Request</button>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
+
+        <!-- Support Panel -->
+        <div v-if="showSupportPanel" class="panel">
+            <div class="panel-header">
+                <h2 class="panel-title">Support</h2>
+                <button class="icon-btn" v-on:click="showSupportPanel = false">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+                    </svg>
+                </button>
+            </div>
+            <div class="panel-content">
+                <div v-if="supportMessages.length === 0" class="empty-state">
+                    <div class="empty-state-text">No messages from support yet.</div>
+                </div>
+                <div v-for="m in supportMessages" v-bind:key="m.id" class="admin-item" v-bind:style="{borderLeft: !m.is_read ? '3px solid var(--accent)' : ''}" v-on:click="openSupportMessage(m)">
+                    <div class="admin-item-header">
+                        <strong>{{ m.title }}</strong>
+                        <span style="font-size: 12px; color: var(--text-tertiary);">{{ formatTime(m.created_at) }}</span>
+                    </div>
+                    <div v-if="expandedSupportId === m.id" style="margin-top: 8px; font-size: 14px; color: var(--text-secondary); line-height: 1.5;">{{ m.body }}</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Admin Panel -->
+        <div v-if="showAdminPanel" class="panel">
+            <div class="panel-header">
+                <h2 class="panel-title">Admin</h2>
+                <button class="icon-btn" v-on:click="showAdminPanel = false">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+                    </svg>
+                </button>
+            </div>
+            <div class="panel-content">
+                <div class="admin-tabs">
+                    <button class="admin-tab" v-bind:class="{active: adminTab === 'reports'}" v-on:click="adminTab = 'reports'; loadReports()">Reports</button>
+                    <button class="admin-tab" v-bind:class="{active: adminTab === 'users'}" v-on:click="adminTab = 'users'; loadUsers()">Users</button>
+                    <button class="admin-tab" v-bind:class="{active: adminTab === 'words'}" v-on:click="adminTab = 'words'; loadBannedWords()">Words</button>
+                    <button class="admin-tab" v-bind:class="{active: adminTab === 'themes'}" v-on:click="adminTab = 'themes'; loadAdminThemes()">Themes</button>
+                    <button class="admin-tab" v-bind:class="{active: adminTab === 'support'}" v-on:click="adminTab = 'support'; loadAdminSupport()">Support</button>
+                </div>
+
+                <!-- Reports Tab -->
+                <div v-if="adminTab === 'reports'">
+                    <div class="admin-list">
+                        <div v-if="adminReports.length === 0" style="text-align: center; color: var(--text-tertiary); padding: 24px;">No reports</div>
+                        <div v-for="r in adminReports" v-bind:key="r.id" class="admin-item">
+                            <div class="admin-item-header">
+                                <div><span>{{ r.reporter_username }}</span> → <strong>{{ r.reported_username }}</strong></div>
+                                <span class="status-badge" v-bind:class="'status-' + r.status">{{ r.status }}</span>
+                            </div>
+                            <div style="font-size: 14px; margin: 8px 0;">{{ r.reason }}</div>
+                            <div v-if="r.status === 'pending'" class="admin-item-actions">
+                                <button style="background: #F59E0B;" v-on:click="adminAction(r.id, 'mute', 3600)">Mute 1h</button>
+                                <button style="background: #EF4444;" v-on:click="adminAction(r.id, 'temp_ban', 86400)">Ban 24h</button>
+                                <button style="background: #6B7280;" v-on:click="rejectReport(r.id)">Reject</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Users Tab -->
+                <div v-if="adminTab === 'users'">
+                    <div class="admin-list">
+                        <div v-for="u in adminUsers" v-bind:key="u.id" class="admin-item" style="display: flex; align-items: center; justify-content: space-between;">
+                            <div>
+                                <strong>{{ u.username }}</strong>
+                                <span v-if="u.is_admin" style="margin-left: 8px; padding: 2px 8px; background: #E9D5FF; color: #7C3AED; border-radius: 10px; font-size: 11px;">Admin</span>
+                                <span v-if="u.is_verified" style="margin-left: 4px; padding: 2px 8px; background: #DBEAFE; color: #2563EB; border-radius: 10px; font-size: 11px;">Verified</span>
+                            </div>
+                            <button class="btn" v-bind:class="u.is_verified ? 'btn-secondary' : 'btn-primary'" style="height: 32px; padding: 0 12px; font-size: 12px;" v-on:click="toggleVerified(u)">
+                                {{ u.is_verified ? 'Unverify' : 'Verify' }}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Words Tab -->
+                <div v-if="adminTab === 'words'">
+                    <div class="admin-form">
+                        <input type="text" v-model="newWord.word" placeholder="Word" style="flex: 1; min-width: 100px;">
+                        <select v-model="newWord.penalty_type">
+                            <option value="warn">Warn</option>
+                            <option value="mute">Mute</option>
+                            <option value="temp_ban">Temp Ban</option>
+                        </select>
+                        <input type="number" v-model="newWord.penalty_duration" placeholder="Sec" style="width: 80px;">
+                        <button class="btn btn-primary" style="height: 40px;" v-on:click="addBannedWord">Add</button>
+                    </div>
+                    <div class="admin-list">
+                        <div v-for="w in bannedWords" v-bind:key="w.id" class="admin-item" style="display: flex; align-items: center; justify-content: space-between;">
+                            <div>
+                                <strong>{{ w.word }}</strong>
+                                <span style="margin-left: 8px; font-size: 12px; color: var(--text-tertiary);">{{ w.penalty_type }}</span>
+                            </div>
+                            <button class="icon-btn" style="color: var(--danger);" v-on:click="deleteBannedWord(w.id)">
+                                <svg viewBox="0 0 24 24" style="width: 18px; height: 18px;">
+                                    <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Themes Tab -->
+                <div v-if="adminTab === 'themes'">
+                    <div class="admin-form" style="flex-direction: column;">
+                        <input type="text" v-model="newTheme.name" placeholder="Theme Name" style="width: 100%;">
+                        <textarea v-model="newTheme.definition_json" placeholder='{"background":"#fff","header":"#fff","incomingBubble":"#f0f2f5","outgoingBubble":"#1877f2","accent":"#1877f2"}' style="min-height: 60px; font-family: monospace; font-size: 12px;"></textarea>
+                        <button class="btn btn-primary" v-on:click="createTheme">Create Theme</button>
+                    </div>
+                    <div class="admin-list" style="margin-top: 16px;">
+                        <div v-for="t in adminThemes" v-bind:key="t.id" class="admin-item" style="display: flex; align-items: center; justify-content: space-between;">
+                            <div>
+                                <strong>{{ t.name }}</strong>
+                                <span v-if="t.is_active" class="status-badge status-approved" style="margin-left: 8px;">Active</span>
+                            </div>
+                            <div style="display: flex; gap: 8px;">
+                                <button v-if="!t.is_active" class="btn btn-primary" style="height: 32px; padding: 0 12px; font-size: 12px;" v-on:click="activateTheme(t.id)">Activate</button>
+                                <button v-else class="btn btn-secondary" style="height: 32px; padding: 0 12px; font-size: 12px;" v-on:click="deactivateTheme(t.id)">Deactivate</button>
+                                <button class="btn btn-danger" style="height: 32px; padding: 0 12px; font-size: 12px;" v-on:click="deleteTheme(t.id)">Delete</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Support Tab -->
+                <div v-if="adminTab === 'support'">
+                    <div class="admin-form" style="flex-direction: column;">
+                        <input type="text" v-model="newSupportMessage.title" placeholder="Title" style="width: 100%;">
+                        <textarea v-model="newSupportMessage.body" placeholder="Message body..." style="min-height: 80px;"></textarea>
+                        <button class="btn btn-primary" v-on:click="sendSupportMessage">Send to All Users</button>
+                    </div>
+                    <div class="admin-list" style="margin-top: 16px;">
+                        <div v-for="m in adminSupportMessages" v-bind:key="m.id" class="admin-item">
+                            <div class="admin-item-header">
+                                <strong>{{ m.title }}</strong>
+                                <span style="font-size: 12px; color: var(--text-tertiary);">{{ formatTime(m.created_at) }}</span>
+                            </div>
+                            <div style="font-size: 14px; color: var(--text-secondary); margin-top: 8px;">{{ m.body }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast -->
+        <div v-if="toast.show" class="toast" v-bind:class="'toast-' + toast.type">{{ toast.message }}</div>
     </div>
-    
-    <div v-if="toast.show" class="toast" :class="'toast-' + toast.type">{{ toast.message }}</div>
-</div>
 
-<script nonce="<?= $nonce ?>" src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-<script nonce="<?= $nonce ?>" src="https://js.pusher.com/8.2.0/pusher.min.js"></script>
-<script nonce="<?= $nonce ?>">
-const { createApp, ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } = Vue;
-
-createApp({
-    setup() {
-        const view = ref('loading');
-        const user = ref(null);
-        const accessToken = ref(null);
-        const convos = ref([]);
-        const currentConvo = ref(null);
-        const messages = ref([]);
-        const messageInput = ref('');
-        const messagesContainer = ref(null);
-        
-        const authTab = ref('login');
-        const authForm = reactive({ username: '', password: '' });
-        const authError = ref('');
-        const authLoading = ref(false);
-        
-        const showInviteModal = ref(false);
-        const inviteUrl = ref('');
-        const showReportModal = ref(false);
-        const reportReason = ref('');
-        
-        const showSettingsPanel = ref(false);
-        const fontScale = ref(1.0);
-        const selectedFontId = ref(1);
-        const currentFont = ref(null);
-        const availableFonts = ref([]);
-        const selectedThemeId = ref(null);
-        const currentTheme = ref(null);
-        const availableThemes = ref([]);
-        const verificationMessage = ref('');
-        const verificationRequestSent = ref(false);
-        const newFont = reactive({ name: '', css_value: '', import_url: '' });
-        
-        const showSupportPanel = ref(false);
-        const supportMessages = ref([]);
-        const supportUnreadCount = ref(0);
-        const expandedSupportId = ref(null);
-        
-        const showAdminPanel = ref(false);
-        const adminTab = ref('reports');
-        const adminReports = ref([]);
-        const bannedWords = ref([]);
-        const adminUsers = ref([]);
-        const adminThemes = ref([]);
-        const verificationRequests = ref([]);
-        const adminSupportMessages = ref([]);
-        const newWord = reactive({ word: '', penalty_type: 'warn', penalty_duration: 0 });
-        const newTheme = reactive({ name: '', definition_json: '' });
-        const newSupportMessage = reactive({ title: '', body: '' });
-        
-        const toast = reactive({ show: false, message: '', type: 'success' });
-        let toastTimeout = null;
-        let pollInterval = null;
-        let refreshTimeout = null;
-        let statusPollInterval = null;
-
-        const pusher = ref(null);
-        const currentChannel = ref(null);
-        const typingUsers = ref({});
-        const typingTimeouts = {};
-        const isTyping = ref(false);
-        const pusherSocketId = ref(null);
-
-        watch([currentTheme, fontScale, currentFont], () => {
-            const root = document.documentElement;
-            const fontLinkId = 'dynamic-font-link';
-            let linkEl = document.getElementById(fontLinkId);
-            
-            if (currentFont.value && currentFont.value.import_url) {
-                if (!linkEl) {
-                    linkEl = document.createElement('link');
-                    linkEl.id = fontLinkId;
-                    linkEl.rel = 'stylesheet';
-                    document.head.appendChild(linkEl);
+    <!-- ES5 Polyfills -->
+    <script nonce="<?php echo $nonce; ?>">
+        // Array polyfills for old browsers
+        if (!Array.prototype.forEach) {
+            Array.prototype.forEach = function(callback, thisArg) {
+                var T, k;
+                if (this == null) throw new TypeError('this is null or not defined');
+                var O = Object(this);
+                var len = O.length >>> 0;
+                if (typeof callback !== 'function') throw new TypeError(callback + ' is not a function');
+                if (arguments.length > 1) T = thisArg;
+                k = 0;
+                while (k < len) {
+                    var kValue;
+                    if (k in O) {
+                        kValue = O[k];
+                        callback.call(T, kValue, k, O);
+                    }
+                    k++;
                 }
-                if (linkEl.href !== currentFont.value.import_url) {
-                    linkEl.href = currentFont.value.import_url;
+            };
+        }
+
+        if (!Array.prototype.map) {
+            Array.prototype.map = function(callback, thisArg) {
+                var T, A, k;
+                if (this == null) throw new TypeError('this is null or not defined');
+                var O = Object(this);
+                var len = O.length >>> 0;
+                if (typeof callback !== 'function') throw new TypeError(callback + ' is not a function');
+                if (arguments.length > 1) T = thisArg;
+                A = new Array(len);
+                k = 0;
+                while (k < len) {
+                    var kValue, mappedValue;
+                    if (k in O) {
+                        kValue = O[k];
+                        mappedValue = callback.call(T, kValue, k, O);
+                        A[k] = mappedValue;
+                    }
+                    k++;
                 }
-            } else if (linkEl) {
-                linkEl.remove();
-            }
-            
-            const fontStack = currentFont.value ? currentFont.value.css_value : "-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif";
-            root.style.setProperty('--font-family', fontStack);
-            root.style.setProperty('--font-scale', fontScale.value);
-            
-            if (currentTheme.value) {
-                const t = currentTheme.value.definition || currentTheme.value;
-                root.style.setProperty('--bg-primary', t.background || '#000');
-                root.style.setProperty('--glass-bg', t.header || 'rgba(30, 30, 32, 0.78)');
-                root.style.setProperty('--bubble-incoming', t.incomingBubble || 'rgba(58, 58, 60, 0.85)');
-                root.style.setProperty('--bubble-outgoing-start', t.outgoingBubble || '#0A84FF');
-                root.style.setProperty('--bubble-outgoing-end', t.outgoingBubble || '#3EA1FF');
-                root.style.setProperty('--accent', t.accent || '#0A84FF');
-            } else {
-                ['--bg-primary', '--glass-bg', '--bubble-incoming', '--bubble-outgoing-start', '--bubble-outgoing-end', '--accent']
-                    .forEach(prop => root.style.removeProperty(prop));
-            }
-        }, { immediate: true });
+                return A;
+            };
+        }
 
-        const typingIndicator = computed(() => {
-            const users = Object.values(typingUsers.value);
-            if (users.length === 0) return '';
-            if (users.length === 1) return users[0] + ' is typing...';
-            return users[0] + ' and others are typing...';
-        });
-
-        const activeStatus = computed(() => {
-            if (!currentConvo.value?.other_last_active) return null;
-            const t = currentConvo.value.other_last_active.replace(' ', 'T') + 'Z';
-            const date = new Date(t);
-            const now = new Date();
-            const diffSeconds = Math.floor((now - date) / 1000);
-            if (diffSeconds < 120) return 'Online';
-            if (diffSeconds < 3600) return 'Active ' + Math.floor(diffSeconds / 60) + 'm ago';
-            if (diffSeconds < 86400) return 'Active ' + Math.floor(diffSeconds / 3600) + 'h ago';
-            return null;
-        });
-
-        const showToast = (message, type = 'success') => {
-            if (toastTimeout) clearTimeout(toastTimeout);
-            toast.show = true;
-            toast.message = message;
-            toast.type = type;
-            toastTimeout = setTimeout(() => { toast.show = false; }, 3000);
-        };
-
-        const api = async (path, opts = {}) => {
-            const headers = { 'Content-Type': 'application/json', ...opts.headers };
-            if (accessToken.value) headers['Authorization'] = 'Bearer ' + accessToken.value;
-            const res = await fetch(path, { ...opts, headers, credentials: 'include' });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Request failed');
-            return data;
-        };
-
-        const formatTime = (dateStr) => {
-            if (!dateStr) return '';
-            const d = new Date(dateStr.replace(' ', 'T') + 'Z');
-            if (isNaN(d)) return dateStr;
-            const now = new Date();
-            if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        };
-
-        const scheduleRefresh = (expiresIn) => {
-            if (refreshTimeout) clearTimeout(refreshTimeout);
-            refreshTimeout = setTimeout(async () => { 
-                if (user.value) {
-                    await tryRefresh();
-                    updatePusherAuth();
+        if (!Array.prototype.filter) {
+            Array.prototype.filter = function(callback, thisArg) {
+                if (this == null) throw new TypeError('this is null or not defined');
+                var O = Object(this);
+                var len = O.length >>> 0;
+                if (typeof callback !== 'function') throw new TypeError(callback + ' is not a function');
+                var res = [];
+                var T = thisArg;
+                var i = 0;
+                while (i < len) {
+                    if (i in O) {
+                        var val = O[i];
+                        if (callback.call(T, val, i, O)) res.push(val);
+                    }
+                    i++;
                 }
-            }, Math.max((expiresIn - 60) * 1000, 10000));
-        };
+                return res;
+            };
+        }
 
-        const updatePusherAuth = () => {
-            if (pusher.value && accessToken.value) {
-                pusher.value.config.auth = {
-                    headers: { 'Authorization': 'Bearer ' + accessToken.value, 'Content-Type': 'application/json' }
-                };
-            }
-        };
+        if (!Array.prototype.find) {
+            Array.prototype.find = function(predicate) {
+                if (this == null) throw new TypeError('this is null or not defined');
+                var o = Object(this);
+                var len = o.length >>> 0;
+                if (typeof predicate !== 'function') throw new TypeError('predicate must be a function');
+                var thisArg = arguments[1];
+                var k = 0;
+                while (k < len) {
+                    var kValue = o[k];
+                    if (predicate.call(thisArg, kValue, k, o)) return kValue;
+                    k++;
+                }
+                return undefined;
+            };
+        }
 
-        const initializePusher = async () => {
-            try {
-                const config = await api('/api/pusher/config');
-                if (!config.enabled || !config.key) return;
-                pusher.value = new Pusher(config.key, {
-                    cluster: config.cluster,
-                    authEndpoint: '/api/pusher/auth',
-                    auth: { headers: { 'Authorization': 'Bearer ' + accessToken.value, 'Content-Type': 'application/json' } }
-                });
-                pusher.value.connection.bind('connected', () => { pusherSocketId.value = pusher.value.connection.socket_id; });
-            } catch (err) { console.error('Pusher init failed:', err); }
-        };
+        if (!Array.prototype.some) {
+            Array.prototype.some = function(fun, thisArg) {
+                if (this == null) throw new TypeError('Array.prototype.some called on null or undefined');
+                if (typeof fun !== 'function') throw new TypeError();
+                var t = Object(this);
+                var len = t.length >>> 0;
+                for (var i = 0; i < len; i++) {
+                    if (i in t && fun.call(thisArg, t[i], i, t)) return true;
+                }
+                return false;
+            };
+        }
 
-        const subscribeToConversation = (convoId) => {
-            if (!pusher.value || !convoId) return;
-            if (currentChannel.value) { pusher.value.unsubscribe(currentChannel.value.name); currentChannel.value = null; }
-            const channelName = 'private-conversation-' + convoId;
-            currentChannel.value = pusher.value.subscribe(channelName);
-            currentChannel.value.bind('pusher:subscription_succeeded', () => { stopPolling(); startStatusPolling(); });
-            currentChannel.value.bind('pusher:subscription_error', () => { startPolling(); });
-            currentChannel.value.bind('new-message', (data) => {
-                const msgConvoId = data.convo_id || data.conversation_id;
-                if (msgConvoId === currentConvo.value?.id) {
-                    const exists = messages.value.some(m => m.id === data.message.id);
-                    if (!exists && data.message.user_id !== user.value?.id) {
-                        messages.value.push(data.message);
-                        nextTick(() => scrollToBottom());
-                        markRead();
+        if (!String.prototype.trim) {
+            String.prototype.trim = function() {
+                return this.replace(/^[\s\uFEFF\xA0]+|[\s\uFEFF\xA0]+$/g, '');
+            };
+        }
+
+        // JSON polyfill check
+        if (typeof JSON === 'undefined') {
+            window.JSON = {
+                parse: function(s) {
+                    return eval('(' + s + ')');
+                },
+                stringify: function(o) {
+                    var t = typeof o;
+                    if (t !== 'object' || o === null) {
+                        if (t === 'string') return '"' + o + '"';
+                        return String(o);
+                    }
+                    var n, v, json = [],
+                        arr = (o && o.constructor === Array);
+                    for (n in o) {
+                        v = o[n];
+                        t = typeof v;
+                        if (t === 'string') v = '"' + v + '"';
+                        else if (t === 'object' && v !== null) v = JSON.stringify(v);
+                        json.push((arr ? '' : '"' + n + '":') + String(v));
+                    }
+                    return (arr ? '[' : '{') + String(json) + (arr ? ']' : '}');
+                }
+            };
+        }
+
+        // Object.keys polyfill
+        if (!Object.keys) {
+            Object.keys = function(obj) {
+                var keys = [];
+                for (var key in obj) {
+                    if (Object.prototype.hasOwnProperty.call(obj, key)) {
+                        keys.push(key);
                     }
                 }
-                loadConvos();
-            });
-            currentChannel.value.bind('user-typing', (data) => {
-                if (data.user_id !== user.value?.id) {
-                    typingUsers.value[data.user_id] = data.username;
-                    if (typingTimeouts[data.user_id]) clearTimeout(typingTimeouts[data.user_id]);
-                    typingTimeouts[data.user_id] = setTimeout(() => { delete typingUsers.value[data.user_id]; }, 3000);
+                return keys;
+            };
+        }
+
+        // Date.now polyfill
+        if (!Date.now) {
+            Date.now = function() {
+                return new Date().getTime();
+            };
+        }
+    </script>
+
+    <!-- Vue 2 Legacy Build -->
+    <script nonce="<?php echo $nonce; ?>" src="https://cdn.jsdelivr.net/npm/vue@2.7.14/dist/vue.min.js"></script>
+
+    <!-- Pusher (optional) -->
+    <script nonce="<?php echo $nonce; ?>" src="https://js.pusher.com/8.2.0/pusher.min.js"></script>
+
+    <!-- App Script (ES5) -->
+    <script nonce="<?php echo $nonce; ?>">
+        (function() {
+            'use strict';
+
+            // XHR helper for legacy browsers
+            function ajax(method, url, data, callback) {
+                var xhr = new XMLHttpRequest();
+                xhr.open(method, url, true);
+                xhr.setRequestHeader('Content-Type', 'application/json');
+
+                var token = window._accessToken;
+                if (token) {
+                    xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+                }
+
+                xhr.onreadystatechange = function() {
+                    if (xhr.readyState === 4) {
+                        var response = null;
+                        try {
+                            response = JSON.parse(xhr.responseText);
+                        } catch (e) {
+                            response = {
+                                error: 'Parse error'
+                            };
+                        }
+                        callback(xhr.status >= 200 && xhr.status < 300 ? null : response, response);
+                    }
+                };
+
+                xhr.onerror = function() {
+                    callback({
+                        error: 'Network error'
+                    }, null);
+                };
+
+                if (data) {
+                    xhr.send(JSON.stringify(data));
+                } else {
+                    xhr.send();
+                }
+            }
+
+            function apiGet(url, callback) {
+                ajax('GET', url, null, callback);
+            }
+
+            function apiPost(url, data, callback) {
+                ajax('POST', url, data, callback);
+            }
+
+            // Global access token storage
+            window._accessToken = null;
+
+            // Create Vue app
+            new Vue({
+                el: '#app',
+                data: {
+                    view: 'loading',
+                    user: null,
+                    isDesktop: window.innerWidth >= 900,
+
+                    // Auth
+                    authTab: 'login',
+                    authForm: {
+                        username: '',
+                        password: ''
+                    },
+                    authError: '',
+                    authLoading: false,
+
+                    // Conversations
+                    convos: [],
+                    currentConvo: null,
+                    messages: [],
+                    messageInput: '',
+                    searchQuery: '',
+
+                    // UI States
+                    showInviteModal: false,
+                    inviteUrl: '',
+                    showReportModal: false,
+                    reportReason: '',
+                    showSettingsPanel: false,
+                    showSupportPanel: false,
+                    showAdminPanel: false,
+
+                    // Settings
+                    fontScale: 1.0,
+                    selectedFontId: 1,
+                    selectedThemeId: null,
+                    availableFonts: [],
+                    availableThemes: [],
+                    currentFont: null,
+                    currentTheme: null,
+
+                    // Support
+                    supportMessages: [],
+                    supportUnreadCount: 0,
+                    expandedSupportId: null,
+
+                    // Admin
+                    adminTab: 'reports',
+                    adminReports: [],
+                    adminUsers: [],
+                    bannedWords: [],
+                    adminThemes: [],
+                    adminSupportMessages: [],
+                    newWord: {
+                        word: '',
+                        penalty_type: 'warn',
+                        penalty_duration: 0
+                    },
+                    newTheme: {
+                        name: '',
+                        definition_json: ''
+                    },
+                    newSupportMessage: {
+                        title: '',
+                        body: ''
+                    },
+
+                    // Toast
+                    toast: {
+                        show: false,
+                        message: '',
+                        type: 'success'
+                    },
+
+                    // Realtime
+                    typingUsers: {},
+                    pusher: null,
+                    currentChannel: null,
+                    pusherSocketId: null,
+                    isTyping: false,
+
+                    // Timers
+                    pollInterval: null,
+                    refreshTimeout: null,
+                    toastTimeout: null
+                },
+
+                computed: {
+                    filteredConvos: function() {
+                        var self = this;
+                        var query = this.searchQuery.toLowerCase().trim();
+                        if (!query) return this.convos;
+                        return this.convos.filter(function(c) {
+                            return c.other_username && c.other_username.toLowerCase().indexOf(query) !== -1;
+                        });
+                    },
+
+                    activeUsers: function() {
+                        var self = this;
+                        var now = Date.now();
+                        return this.convos.filter(function(c) {
+                            if (!c.other_last_active) return false;
+                            var t = c.other_last_active.replace(' ', 'T') + 'Z';
+                            var date = new Date(t);
+                            return (now - date.getTime()) < 120000; // 2 minutes
+                        });
+                    },
+
+                    typingIndicator: function() {
+                        var users = [];
+                        for (var key in this.typingUsers) {
+                            if (this.typingUsers.hasOwnProperty(key)) {
+                                users.push(this.typingUsers[key]);
+                            }
+                        }
+                        if (users.length === 0) return '';
+                        if (users.length === 1) return users[0] + ' is typing...';
+                        return users[0] + ' and others are typing...';
+                    },
+
+                    activeStatus: function() {
+                        if (!this.currentConvo || !this.currentConvo.other_last_active) return null;
+                        var t = this.currentConvo.other_last_active.replace(' ', 'T') + 'Z';
+                        var date = new Date(t);
+                        var now = Date.now();
+                        var diffSeconds = Math.floor((now - date.getTime()) / 1000);
+                        if (diffSeconds < 120) return 'Online';
+                        if (diffSeconds < 3600) return 'Active ' + Math.floor(diffSeconds / 60) + 'm ago';
+                        if (diffSeconds < 86400) return 'Active ' + Math.floor(diffSeconds / 3600) + 'h ago';
+                        return null;
+                    },
+
+                    fontScalePercent: function() {
+                        return Math.round(this.fontScale * 100);
+                    },
+
+                    fontSizePx: function() {
+                        return (15 * this.fontScale) + 'px';
+                    }
+                },
+
+                watch: {
+                    fontScale: function(val) {
+                        document.documentElement.style.setProperty('--font-scale', val);
+                    },
+
+                    currentTheme: function(val) {
+                        var root = document.documentElement;
+                        if (val && val.definition) {
+                            var t = val.definition;
+                            root.style.setProperty('--bg', t.background || '#FFFFFF');
+                            root.style.setProperty('--bubble-incoming', t.incomingBubble || '#F0F2F5');
+                            root.style.setProperty('--bubble-outgoing', t.outgoingBubble || '#1877F2');
+                            root.style.setProperty('--accent', t.accent || '#1877F2');
+                            root.classList.add('themed');
+                        } else {
+                            root.style.removeProperty('--bg');
+                            root.style.removeProperty('--bubble-incoming');
+                            root.style.removeProperty('--bubble-outgoing');
+                            root.style.removeProperty('--accent');
+                            root.classList.remove('themed');
+                        }
+                    },
+
+                    currentFont: function(val) {
+                        var root = document.documentElement;
+                        var linkId = 'dynamic-font-link';
+                        var linkEl = document.getElementById(linkId);
+
+                        if (val && val.import_url) {
+                            if (!linkEl) {
+                                linkEl = document.createElement('link');
+                                linkEl.id = linkId;
+                                linkEl.rel = 'stylesheet';
+                                document.head.appendChild(linkEl);
+                            }
+                            if (linkEl.href !== val.import_url) {
+                                linkEl.href = val.import_url;
+                            }
+                        } else if (linkEl) {
+                            linkEl.parentNode.removeChild(linkEl);
+                        }
+
+                        var fontStack = val ? val.css_value : "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif";
+                        root.style.setProperty('--font', fontStack);
+                    }
+                },
+
+                methods: {
+                    // Toast
+                    showToast: function(message, type) {
+                        var self = this;
+                        type = type || 'success';
+                        if (this.toastTimeout) clearTimeout(this.toastTimeout);
+                        this.toast.show = true;
+                        this.toast.message = message;
+                        this.toast.type = type;
+                        this.toastTimeout = setTimeout(function() {
+                            self.toast.show = false;
+                        }, 3000);
+                    },
+
+                    // Formatting
+                    formatTime: function(dateStr) {
+                        if (!dateStr) return '';
+                        var d = new Date(dateStr.replace(' ', 'T') + 'Z');
+                        if (isNaN(d.getTime())) return dateStr;
+                        var now = new Date();
+                        if (d.toDateString() === now.toDateString()) {
+                            return d.toLocaleTimeString([], {
+                                hour: '2-digit',
+                                minute: '2-digit'
+                            });
+                        }
+                        return d.toLocaleDateString([], {
+                            month: 'short',
+                            day: 'numeric'
+                        });
+                    },
+
+                    getInitial: function(name) {
+                        if (!name) return 'U';
+                        return name.charAt(0).toUpperCase();
+                    },
+
+                    isUserOnline: function(convo) {
+                        if (!convo.other_last_active) return false;
+                        var t = convo.other_last_active.replace(' ', 'T') + 'Z';
+                        var date = new Date(t);
+                        return (Date.now() - date.getTime()) < 120000;
+                    },
+
+                    stopProp: function(e) {
+                        e.stopPropagation();
+                    },
+
+                    closeInviteModal: function(e) {
+                        if (e.target === e.currentTarget) this.showInviteModal = false;
+                    },
+
+                    closeReportModal: function(e) {
+                        if (e.target === e.currentTarget) this.showReportModal = false;
+                    },
+
+                    // Auth
+                    tryRefresh: function() {
+                        var self = this;
+                        apiPost('/api/auth/refresh', {}, function(err, data) {
+                            if (err) {
+                                self.view = 'auth';
+                                return;
+                            }
+                            window._accessToken = data.access_token;
+                            self.user = data.user;
+                            self.fontScale = data.user.font_scale || 1.0;
+                            self.selectedFontId = data.user.font_id || 1;
+                            self.currentFont = data.user.font;
+                            self.selectedThemeId = data.user.theme_id;
+                            self.currentTheme = data.user.theme ? (typeof data.user.theme === 'string' ? JSON.parse(data.user.theme) : data.user.theme) : null;
+
+                            self.initPusher();
+                            self.handlePendingInvite();
+                            self.loadConvos();
+                            self.loadAvailableThemes();
+                            self.loadFonts();
+                            self.loadSupportUnreadCount();
+                            self.view = 'chats';
+                            self.scheduleRefresh(data.expires_in);
+                        });
+                    },
+
+                    scheduleRefresh: function(expiresIn) {
+                        var self = this;
+                        if (this.refreshTimeout) clearTimeout(this.refreshTimeout);
+                        var delay = Math.max((expiresIn - 60) * 1000, 10000);
+                        this.refreshTimeout = setTimeout(function() {
+                            if (self.user) {
+                                self.tryRefresh();
+                            }
+                        }, delay);
+                    },
+
+                    handleAuth: function(e) {
+                        e.preventDefault();
+                        if (this.authLoading) return;
+
+                        var self = this;
+                        this.authLoading = true;
+                        this.authError = '';
+
+                        var doLogin = function() {
+                            apiPost('/api/auth/login', self.authForm, function(err, data) {
+                                self.authLoading = false;
+                                if (err) {
+                                    self.authError = err.error || 'Login failed';
+                                    return;
+                                }
+                                window._accessToken = data.access_token;
+                                self.user = data.user;
+                                self.fontScale = data.user.font_scale || 1.0;
+                                self.selectedFontId = data.user.font_id || 1;
+                                self.currentFont = data.user.font;
+                                self.selectedThemeId = data.user.theme_id;
+                                self.currentTheme = data.user.theme;
+
+                                self.initPusher();
+                                self.handlePendingInvite();
+                                self.loadConvos();
+                                self.loadAvailableThemes();
+                                self.loadFonts();
+                                self.loadSupportUnreadCount();
+                                self.view = 'chats';
+                                self.scheduleRefresh(data.expires_in);
+                                self.authForm.username = '';
+                                self.authForm.password = '';
+                            });
+                        };
+
+                        if (this.authTab === 'register') {
+                            apiPost('/api/auth/register', this.authForm, function(err, data) {
+                                if (err) {
+                                    self.authLoading = false;
+                                    self.authError = err.error || 'Registration failed';
+                                    return;
+                                }
+                                doLogin();
+                            });
+                        } else {
+                            doLogin();
+                        }
+                    },
+
+                    logout: function() {
+                        var self = this;
+                        this.stopPolling();
+                        if (this.pusher) {
+                            this.pusher.disconnect();
+                            this.pusher = null;
+                        }
+                        apiPost('/api/auth/logout', {}, function() {
+                            window._accessToken = null;
+                            self.user = null;
+                            self.convos = [];
+                            self.currentConvo = null;
+                            self.view = 'auth';
+                        });
+                    },
+
+                    handlePendingInvite: function() {
+                        var self = this;
+                        var invite = localStorage.getItem('pending_invite');
+                        if (!invite) return;
+                        localStorage.removeItem('pending_invite');
+                        apiPost('/api/invite/redeem', {
+                            token: invite
+                        }, function(err, data) {
+                            if (err) {
+                                if (err.error && err.error.indexOf('Already') === -1) {
+                                    self.showToast(err.error, 'error');
+                                }
+                                return;
+                            }
+                            self.showToast('Invite accepted!');
+                            self.loadConvos();
+                        });
+                    },
+
+                    // Pusher
+                    initPusher: function() {
+                        var self = this;
+                        if (typeof Pusher === 'undefined') return;
+
+                        apiGet('/api/pusher/config', function(err, config) {
+                            if (err || !config.enabled || !config.key) return;
+
+                            self.pusher = new Pusher(config.key, {
+                                cluster: config.cluster,
+                                authEndpoint: '/api/pusher/auth',
+                                auth: {
+                                    headers: {
+                                        'Authorization': 'Bearer ' + window._accessToken,
+                                        'Content-Type': 'application/json'
+                                    }
+                                }
+                            });
+
+                            self.pusher.connection.bind('connected', function() {
+                                self.pusherSocketId = self.pusher.connection.socket_id;
+                            });
+                        });
+                    },
+
+                    subscribeToConversation: function(convoId) {
+                        var self = this;
+                        if (!this.pusher || !convoId) return;
+
+                        if (this.currentChannel) {
+                            this.pusher.unsubscribe(this.currentChannel.name);
+                            this.currentChannel = null;
+                        }
+
+                        var channelName = 'private-conversation-' + convoId;
+                        this.currentChannel = this.pusher.subscribe(channelName);
+
+                        this.currentChannel.bind('pusher:subscription_succeeded', function() {
+                            self.stopPolling();
+                        });
+
+                        this.currentChannel.bind('pusher:subscription_error', function() {
+                            self.startPolling();
+                        });
+
+                        this.currentChannel.bind('new-message', function(data) {
+                            var msgConvoId = data.convo_id || data.conversation_id;
+                            if (msgConvoId === (self.currentConvo ? self.currentConvo.id : null)) {
+                                var exists = self.messages.some(function(m) {
+                                    return m.id === data.message.id;
+                                });
+                                if (!exists && data.message.user_id !== (self.user ? self.user.id : null)) {
+                                    self.messages.push(data.message);
+                                    self.$nextTick(function() {
+                                        self.scrollToBottom();
+                                    });
+                                    self.markRead();
+                                }
+                            }
+                            self.loadConvos();
+                        });
+
+                        this.currentChannel.bind('user-typing', function(data) {
+                            if (data.user_id !== (self.user ? self.user.id : null)) {
+                                self.$set(self.typingUsers, data.user_id, data.username);
+                                setTimeout(function() {
+                                    self.$delete(self.typingUsers, data.user_id);
+                                }, 3000);
+                            }
+                        });
+
+                        this.currentChannel.bind('message-read', function(data) {
+                            self.messages.forEach(function(m) {
+                                if (m.id <= data.message_id && m.is_mine) {
+                                    m.is_read_by_other = true;
+                                }
+                            });
+                        });
+
+                        this.currentChannel.bind('message-deleted', function(data) {
+                            var idx = -1;
+                            for (var i = 0; i < self.messages.length; i++) {
+                                if (self.messages[i].id === data.message_id) {
+                                    idx = i;
+                                    break;
+                                }
+                            }
+                            if (idx !== -1) {
+                                self.messages.splice(idx, 1);
+                            }
+                        });
+                    },
+
+                    handleTyping: function() {
+                        var self = this;
+                        if (!this.currentConvo || !this.user) return;
+                        if (!this.isTyping) {
+                            this.isTyping = true;
+                            apiPost('/api/pusher/typing', {
+                                convo_id: this.currentConvo.id
+                            }, function() {});
+                            setTimeout(function() {
+                                self.isTyping = false;
+                            }, 2500);
+                        }
+                    },
+
+                    // Data loading
+                    loadConvos: function() {
+                        var self = this;
+                        apiGet('/api/convos', function(err, data) {
+                            if (err) {
+                                self.showToast('Failed to load conversations', 'error');
+                                return;
+                            }
+                            self.convos = data.convos;
+                        });
+                    },
+
+                    loadAvailableThemes: function() {
+                        var self = this;
+                        apiGet('/api/themes', function(err, data) {
+                            if (err) return;
+                            self.availableThemes = data.themes.map(function(t) {
+                                t.definition = typeof t.definition === 'string' ? JSON.parse(t.definition) : t.definition;
+                                return t;
+                            });
+                        });
+                    },
+
+                    loadFonts: function() {
+                        var self = this;
+                        apiGet('/api/fonts', function(err, data) {
+                            if (err) return;
+                            self.availableFonts = data.fonts;
+                        });
+                    },
+
+                    loadSupportUnreadCount: function() {
+                        var self = this;
+                        apiGet('/api/support/unread_count', function(err, data) {
+                            if (err) return;
+                            self.supportUnreadCount = data.unread_count;
+                        });
+                    },
+
+                    // Conversations
+                    createInvite: function() {
+                        var self = this;
+                        apiPost('/api/invite/create', {}, function(err, data) {
+                            if (err) {
+                                self.showToast(err.error, 'error');
+                                return;
+                            }
+                            self.inviteUrl = data.invite_url;
+                            self.showInviteModal = true;
+                            self.loadConvos();
+                        });
+                    },
+
+                    copyInvite: function() {
+                        var self = this;
+                        if (navigator.clipboard && navigator.clipboard.writeText) {
+                            navigator.clipboard.writeText(this.inviteUrl).then(function() {
+                                self.showToast('Copied!');
+                                self.showInviteModal = false;
+                            }).catch(function() {
+                                self.showToast('Failed to copy', 'error');
+                            });
+                        } else {
+                            // Fallback for old browsers
+                            var textarea = document.createElement('textarea');
+                            textarea.value = this.inviteUrl;
+                            document.body.appendChild(textarea);
+                            textarea.select();
+                            try {
+                                document.execCommand('copy');
+                                self.showToast('Copied!');
+                                self.showInviteModal = false;
+                            } catch (e) {
+                                self.showToast('Failed to copy', 'error');
+                            }
+                            document.body.removeChild(textarea);
+                        }
+                    },
+
+                    openConvo: function(c) {
+                        var self = this;
+                        this.currentConvo = c;
+                        this.messages = [];
+                        this.typingUsers = {};
+
+                        if (!this.isDesktop) {
+                            this.view = 'chat';
+                        }
+
+                        this.subscribeToConversation(c.id);
+                        this.loadMessages();
+
+                        if (!this.pusher) {
+                            this.startPolling();
+                        }
+                    },
+
+                    openConvoByUser: function(u) {
+                        var c = this.convos.find(function(conv) {
+                            return conv.other_user_id === u.id;
+                        });
+                        if (c) this.openConvo(c);
+                    },
+
+                    goBack: function() {
+                        this.stopPolling();
+                        if (this.currentChannel && this.pusher) {
+                            this.pusher.unsubscribe(this.currentChannel.name);
+                        }
+                        this.currentChannel = null;
+                        this.currentConvo = null;
+                        this.view = 'chats';
+                        this.loadConvos();
+                    },
+
+                    loadMessages: function() {
+                        var self = this;
+                        if (!this.currentConvo) return;
+
+                        apiGet('/api/messages?convo_id=' + this.currentConvo.id, function(err, data) {
+                            if (err) {
+                                self.showToast('Failed to load messages', 'error');
+                                return;
+                            }
+                            self.messages = data.messages;
+                            self.$nextTick(function() {
+                                self.scrollToBottom();
+                            });
+                            self.markRead();
+                        });
+                    },
+
+                    sendMessage: function(e) {
+                        e.preventDefault();
+                        var self = this;
+                        var body = this.messageInput.trim();
+                        if (!body || !this.currentConvo) return;
+
+                        this.messageInput = '';
+
+                        var payload = {
+                            convo_id: this.currentConvo.id,
+                            body: body
+                        };
+                        if (this.pusherSocketId) {
+                            payload.socket_id = this.pusherSocketId;
+                        }
+
+                        apiPost('/api/messages/send', payload, function(err, result) {
+                            if (err) {
+                                self.messageInput = body;
+                                self.showToast(err.error, 'error');
+                                return;
+                            }
+
+                            self.messages.push({
+                                id: result.message_id,
+                                convo_id: self.currentConvo.id,
+                                user_id: self.user.id,
+                                username: self.user.username,
+                                is_verified: self.user.is_verified,
+                                body: body,
+                                created_at: new Date().toISOString().replace('T', ' ').substring(0, 19),
+                                is_delivered: false,
+                                is_read_by_other: false,
+                                is_mine: true
+                            });
+
+                            self.$nextTick(function() {
+                                self.scrollToBottom();
+                            });
+                        });
+                    },
+
+                    markRead: function() {
+                        var self = this;
+                        if (!this.currentConvo) return;
+
+                        var unread = this.messages.filter(function(m) {
+                            return !m.is_mine;
+                        });
+                        if (unread.length === 0) return;
+
+                        var lastId = 0;
+                        unread.forEach(function(m) {
+                            if (m.id > lastId) lastId = m.id;
+                        });
+
+                        var payload = {
+                            convo_id: this.currentConvo.id,
+                            up_to_message_id: lastId
+                        };
+                        if (this.pusherSocketId) {
+                            payload.socket_id = this.pusherSocketId;
+                        }
+
+                        apiPost('/api/messages/mark_read', payload, function() {});
+                    },
+
+                    scrollToBottom: function() {
+                        var container = this.$refs.messagesContainer;
+                        if (container) {
+                            container.scrollTop = container.scrollHeight;
+                        }
+                    },
+
+                    // Polling
+                    startPolling: function() {
+                        var self = this;
+                        this.stopPolling();
+
+                        this.pollInterval = setInterval(function() {
+                            if (self.view !== 'chat' || !self.currentConvo) return;
+
+                            var lastId = 0;
+                            self.messages.forEach(function(m) {
+                                if (m.id > lastId) lastId = m.id;
+                            });
+
+                            apiGet('/api/poll?convo_id=' + self.currentConvo.id + '&last_id=' + lastId, function(err, data) {
+                                if (err) return;
+
+                                if (data.messages && data.messages.length) {
+                                    var existingIds = {};
+                                    self.messages.forEach(function(m) {
+                                        existingIds[m.id] = true;
+                                    });
+
+                                    var newMsgs = data.messages.filter(function(m) {
+                                        return !existingIds[m.id];
+                                    });
+                                    if (newMsgs.length) {
+                                        newMsgs.forEach(function(m) {
+                                            self.messages.push(m);
+                                        });
+                                        self.$nextTick(function() {
+                                            self.scrollToBottom();
+                                        });
+                                        self.markRead();
+                                    }
+                                }
+
+                                if (data.status_updates) {
+                                    data.status_updates.forEach(function(u) {
+                                        var msg = self.messages.find(function(m) {
+                                            return m.id === u.id;
+                                        });
+                                        if (msg) {
+                                            msg.is_delivered = u.is_delivered;
+                                            msg.is_read_by_other = u.is_read_by_other;
+                                        }
+                                    });
+                                }
+
+                                if (data.deleted_ids && data.deleted_ids.length) {
+                                    var deletedSet = {};
+                                    data.deleted_ids.forEach(function(id) {
+                                        deletedSet[id] = true;
+                                    });
+                                    self.messages = self.messages.filter(function(m) {
+                                        return !deletedSet[m.id];
+                                    });
+                                }
+
+                                if (data.partner_last_active && self.currentConvo) {
+                                    self.currentConvo.other_last_active = data.partner_last_active;
+                                }
+                            });
+                        }, 2000);
+                    },
+
+                    stopPolling: function() {
+                        if (this.pollInterval) {
+                            clearInterval(this.pollInterval);
+                            this.pollInterval = null;
+                        }
+                    },
+
+                    // Report
+                    submitReport: function() {
+                        var self = this;
+                        if (!this.reportReason.trim() || !this.currentConvo) return;
+
+                        apiPost('/api/report', {
+                            reported_user_id: this.currentConvo.other_user_id,
+                            reason: this.reportReason.trim()
+                        }, function(err, data) {
+                            if (err) {
+                                self.showToast(err.error, 'error');
+                                return;
+                            }
+                            self.showToast('Report submitted');
+                            self.showReportModal = false;
+                            self.reportReason = '';
+                        });
+                    },
+
+                    // Settings
+                    increaseFontScale: function() {
+                        var self = this;
+                        var newScale = Math.min(1.4, this.fontScale + 0.05);
+                        this.fontScale = newScale;
+                        apiPost('/api/user/font_scale', {
+                            scale: newScale
+                        }, function(err) {
+                            if (err) self.showToast(err.error, 'error');
+                        });
+                    },
+
+                    decreaseFontScale: function() {
+                        var self = this;
+                        var newScale = Math.max(0.85, this.fontScale - 0.05);
+                        this.fontScale = newScale;
+                        apiPost('/api/user/font_scale', {
+                            scale: newScale
+                        }, function(err) {
+                            if (err) self.showToast(err.error, 'error');
+                        });
+                    },
+
+                    updateFont: function() {
+                        var self = this;
+                        apiPost('/api/user/font', {
+                            font_id: this.selectedFontId
+                        }, function(err, data) {
+                            if (err) {
+                                self.showToast(err.error, 'error');
+                                return;
+                            }
+                            self.currentFont = data.font;
+                            self.showToast('Font updated');
+                        });
+                    },
+
+                    updateTheme: function() {
+                        var self = this;
+                        var themeId = this.selectedThemeId;
+                        if (themeId !== null && themeId !== undefined && themeId !== '') {
+                            themeId = Number(themeId);
+                            if (isNaN(themeId) || themeId === 0) themeId = null;
+                        } else {
+                            themeId = null;
+                        }
+
+                        apiPost('/api/user/theme', {
+                            theme_id: themeId
+                        }, function(err, data) {
+                            if (err) {
+                                self.showToast(err.error, 'error');
+                                return;
+                            }
+                            self.currentTheme = null;
+                            self.$nextTick(function() {
+                                if (data.theme) {
+                                    self.currentTheme = typeof data.theme === 'string' ? JSON.parse(data.theme) : data.theme;
+                                }
+                            });
+                            self.showToast('Theme updated');
+                        });
+                    },
+
+                    requestVerification: function() {
+                        var self = this;
+                        var message = prompt('Why should you be verified?');
+                        if (!message || !message.trim()) return;
+
+                        apiPost('/api/user/request_verification', {
+                            message: message.trim()
+                        }, function(err, data) {
+                            if (err) {
+                                self.showToast(err.error, 'error');
+                                return;
+                            }
+                            self.showToast('Verification request submitted');
+                        });
+                    },
+
+                    // Support
+                    openSupport: function() {
+                        var self = this;
+                        this.showSupportPanel = true;
+                        apiGet('/api/support', function(err, data) {
+                            if (err) {
+                                self.showToast(err.error, 'error');
+                                return;
+                            }
+                            self.supportMessages = data.messages;
+                        });
+                    },
+
+                    openSupportMessage: function(m) {
+                        var self = this;
+                        if (this.expandedSupportId === m.id) {
+                            this.expandedSupportId = null;
+                            return;
+                        }
+                        this.expandedSupportId = m.id;
+
+                        if (!m.is_read) {
+                            apiPost('/api/support/mark_read', {
+                                message_id: m.id
+                            }, function(err) {
+                                if (!err) {
+                                    m.is_read = true;
+                                    self.supportUnreadCount = Math.max(0, self.supportUnreadCount - 1);
+                                }
+                            });
+                        }
+                    },
+
+                    // Admin methods
+                    loadReports: function() {
+                        var self = this;
+                        apiGet('/api/admin/reports', function(err, data) {
+                            if (err) {
+                                self.showToast(err.error, 'error');
+                                return;
+                            }
+                            self.adminReports = data.reports;
+                        });
+                    },
+
+                    adminAction: function(reportId, action, duration) {
+                        var self = this;
+                        apiPost('/api/admin/reports/action', {
+                            report_id: reportId,
+                            action: action,
+                            duration: duration
+                        }, function(err, data) {
+                            if (err) {
+                                self.showToast(err.error, 'error');
+                                return;
+                            }
+                            self.loadReports();
+                            self.showToast('Action applied');
+                        });
+                    },
+
+                    rejectReport: function(reportId) {
+                        var self = this;
+                        apiPost('/api/admin/reports/reject', {
+                            report_id: reportId
+                        }, function(err, data) {
+                            if (err) {
+                                self.showToast(err.error, 'error');
+                                return;
+                            }
+                            self.loadReports();
+                            self.showToast('Report rejected');
+                        });
+                    },
+
+                    loadUsers: function() {
+                        var self = this;
+                        apiGet('/api/admin/users', function(err, data) {
+                            if (err) {
+                                self.showToast(err.error, 'error');
+                                return;
+                            }
+                            self.adminUsers = data.users;
+                        });
+                    },
+
+                    toggleVerified: function(u) {
+                        var self = this;
+                        apiPost('/api/admin/set_verified', {
+                            user_id: u.id,
+                            value: !u.is_verified
+                        }, function(err, data) {
+                            if (err) {
+                                self.showToast(err.error, 'error');
+                                return;
+                            }
+                            u.is_verified = !u.is_verified;
+                            self.showToast(u.is_verified ? 'User verified' : 'User unverified');
+                        });
+                    },
+
+                    loadBannedWords: function() {
+                        var self = this;
+                        apiGet('/api/admin/banned_words', function(err, data) {
+                            if (err) {
+                                self.showToast(err.error, 'error');
+                                return;
+                            }
+                            self.bannedWords = data.banned_words;
+                        });
+                    },
+
+                    addBannedWord: function() {
+                        var self = this;
+                        if (!this.newWord.word.trim()) return;
+
+                        apiPost('/api/admin/banned_words/add', this.newWord, function(err, data) {
+                            if (err) {
+                                self.showToast(err.error, 'error');
+                                return;
+                            }
+                            self.loadBannedWords();
+                            self.showToast('Word added');
+                            self.newWord.word = '';
+                            self.newWord.penalty_type = 'warn';
+                            self.newWord.penalty_duration = 0;
+                        });
+                    },
+
+                    deleteBannedWord: function(id) {
+                        var self = this;
+                        apiPost('/api/admin/banned_words/delete', {
+                            id: id
+                        }, function(err, data) {
+                            if (err) {
+                                self.showToast(err.error, 'error');
+                                return;
+                            }
+                            self.loadBannedWords();
+                            self.showToast('Word deleted');
+                        });
+                    },
+
+                    loadAdminThemes: function() {
+                        var self = this;
+                        apiGet('/api/admin/themes', function(err, data) {
+                            if (err) {
+                                self.showToast(err.error, 'error');
+                                return;
+                            }
+                            self.adminThemes = data.themes;
+                        });
+                    },
+
+                    createTheme: function() {
+                        var self = this;
+                        if (!this.newTheme.name.trim() || !this.newTheme.definition_json.trim()) return;
+
+                        apiPost('/api/admin/themes/create', this.newTheme, function(err, data) {
+                            if (err) {
+                                self.showToast(err.error, 'error');
+                                return;
+                            }
+                            self.loadAdminThemes();
+                            self.loadAvailableThemes();
+                            self.showToast('Theme created');
+                            self.newTheme.name = '';
+                            self.newTheme.definition_json = '';
+                        });
+                    },
+
+                    activateTheme: function(themeId) {
+                        var self = this;
+                        apiPost('/api/admin/themes/activate', {
+                            theme_id: themeId
+                        }, function(err, data) {
+                            if (err) {
+                                self.showToast(err.error, 'error');
+                                return;
+                            }
+                            self.loadAdminThemes();
+                            self.loadAvailableThemes();
+                            self.showToast('Theme activated');
+                        });
+                    },
+
+                    deactivateTheme: function(themeId) {
+                        var self = this;
+                        apiPost('/api/admin/themes/deactivate', {
+                            theme_id: themeId
+                        }, function(err, data) {
+                            if (err) {
+                                self.showToast(err.error, 'error');
+                                return;
+                            }
+                            self.loadAdminThemes();
+                            self.loadAvailableThemes();
+                            self.showToast('Theme deactivated');
+                        });
+                    },
+
+                    deleteTheme: function(themeId) {
+                        var self = this;
+                        if (!confirm('Delete this theme?')) return;
+
+                        apiPost('/api/admin/themes/delete', {
+                            theme_id: themeId
+                        }, function(err, data) {
+                            if (err) {
+                                self.showToast(err.error, 'error');
+                                return;
+                            }
+                            self.loadAdminThemes();
+                            self.loadAvailableThemes();
+                            self.showToast('Theme deleted');
+                        });
+                    },
+
+                    loadAdminSupport: function() {
+                        var self = this;
+                        apiGet('/api/admin/support/list', function(err, data) {
+                            if (err) {
+                                self.showToast(err.error, 'error');
+                                return;
+                            }
+                            self.adminSupportMessages = data.messages;
+                        });
+                    },
+
+                    sendSupportMessage: function() {
+                        var self = this;
+                        if (!this.newSupportMessage.title.trim() || !this.newSupportMessage.body.trim()) return;
+
+                        apiPost('/api/admin/support/send', this.newSupportMessage, function(err, data) {
+                            if (err) {
+                                self.showToast(err.error, 'error');
+                                return;
+                            }
+                            self.loadAdminSupport();
+                            self.showToast('Message sent');
+                            self.newSupportMessage.title = '';
+                            self.newSupportMessage.body = '';
+                        });
+                    },
+
+                    // Resize handler
+                    handleResize: function() {
+                        this.isDesktop = window.innerWidth >= 900;
+                    }
+                },
+
+                mounted: function() {
+                    var self = this;
+
+                    // Handle resize
+                    window.addEventListener('resize', function() {
+                        self.handleResize();
+                    });
+
+                    // Check for pending invite
+                    var params = new URLSearchParams(window.location.search);
+                    var invite = params.get('invite');
+                    if (invite) {
+                        localStorage.setItem('pending_invite', invite);
+                        window.history.replaceState({}, '', window.location.pathname);
+                    }
+
+                    // Try to restore session
+                    this.tryRefresh();
+                },
+
+                beforeDestroy: function() {
+                    this.stopPolling();
+                    if (this.refreshTimeout) clearTimeout(this.refreshTimeout);
+                    if (this.toastTimeout) clearTimeout(this.toastTimeout);
+                    if (this.pusher) this.pusher.disconnect();
                 }
             });
-            currentChannel.value.bind('message-read', (data) => {
-                messages.value.forEach(m => { if (m.id <= data.message_id && m.is_mine) m.is_read_by_other = true; });
-            });
-            currentChannel.value.bind('message-deleted', (data) => {
-                const idx = messages.value.findIndex(m => m.id === data.message_id);
-                if (idx !== -1) messages.value.splice(idx, 1);
-            });
-        };
-
-        const handleTyping = () => {
-            if (!currentConvo.value || !user.value) return;
-            if (!isTyping.value) {
-                isTyping.value = true;
-                api('/api/pusher/typing', { method: 'POST', body: JSON.stringify({ convo_id: currentConvo.value.id }) }).catch(() => {});
-                setTimeout(() => { isTyping.value = false; }, 2500);
-            }
-        };
-
-        const startStatusPolling = () => {
-            if (statusPollInterval) clearInterval(statusPollInterval);
-            statusPollInterval = setInterval(async () => {
-                if (view.value !== 'chat' || !currentConvo.value) return;
-                try {
-                    const lastId = messages.value.length ? Math.max(...messages.value.map(m => m.id)) : 0;
-                    const data = await api('/api/poll?convo_id=' + currentConvo.value.id + '&last_id=' + lastId);
-                    if (data.partner_last_active) currentConvo.value.other_last_active = data.partner_last_active;
-                } catch(e) {}
-            }, 60000);
-        };
-
-        const tryRefresh = async () => {
-            try {
-                const res = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' });
-                if (res.ok) {
-                    const data = await res.json();
-                    accessToken.value = data.access_token;
-                    user.value = data.user;
-                    fontScale.value = data.user.font_scale || 1.0;
-                    selectedFontId.value = data.user.font_id || 1;
-                    currentFont.value = data.user.font;
-                    selectedThemeId.value = data.user.theme_id;
-                    currentTheme.value = data.user.theme ? (typeof data.user.theme === 'string' ? JSON.parse(data.user.theme) : data.user.theme) : null;
-                    await initializePusher();
-                    await handlePendingInvite();
-                    await loadConvos();
-                    await loadAvailableThemes();
-                    await loadFonts();
-                    await loadSupportUnreadCount();
-                    view.value = 'convos';
-                    scheduleRefresh(data.expires_in);
-                } else { view.value = 'auth'; }
-            } catch (e) { view.value = 'auth'; }
-        };
-
-        const handlePendingInvite = async () => {
-            const invite = localStorage.getItem('pending_invite');
-            if (!invite) return;
-            localStorage.removeItem('pending_invite');
-            try { await api('/api/invite/redeem', { method: 'POST', body: JSON.stringify({ token: invite }) }); showToast('Invite accepted!'); } catch (e) { if (!e.message.includes('Already')) showToast(e.message, 'error'); }
-        };
-
-        const handleAuth = async () => {
-            if (authLoading.value) return;
-            authLoading.value = true;
-            authError.value = '';
-            try {
-                if (authTab.value === 'register') await api('/api/auth/register', { method: 'POST', body: JSON.stringify(authForm) });
-                const data = await api('/api/auth/login', { method: 'POST', body: JSON.stringify(authForm) });
-                accessToken.value = data.access_token;
-                user.value = data.user;
-                fontScale.value = data.user.font_scale || 1.0;
-                selectedFontId.value = data.user.font_id || 1;
-                currentFont.value = data.user.font;
-                selectedThemeId.value = data.user.theme_id;
-                currentTheme.value = data.user.theme;
-                await initializePusher();
-                await handlePendingInvite();
-                await loadConvos();
-                await loadAvailableThemes();
-                await loadFonts();
-                await loadSupportUnreadCount();
-                view.value = 'convos';
-                scheduleRefresh(data.expires_in);
-                authForm.username = '';
-                authForm.password = '';
-            } catch (e) { authError.value = e.message; } finally { authLoading.value = false; }
-        };
-
-        const logout = async () => { 
-            stopPolling(); 
-            if (pusher.value) { pusher.value.disconnect(); pusher.value = null; }
-            try { await api('/api/auth/logout', { method: 'POST' }); } catch (e) {} 
-            accessToken.value = null; 
-            user.value = null; 
-            convos.value = []; 
-            view.value = 'auth'; 
-        };
-        
-        const loadConvos = async () => { try { const data = await api('/api/convos'); convos.value = data.convos; } catch (e) { showToast('Failed to load conversations', 'error'); } };
-        const loadAvailableThemes = async () => { try { const data = await api('/api/themes'); availableThemes.value = data.themes.map(t => ({ ...t, definition: typeof t.definition === 'string' ? JSON.parse(t.definition) : t.definition })); } catch (e) {} };
-        const loadFonts = async () => { try { const data = await api('/api/fonts'); availableFonts.value = data.fonts; } catch (e) {} };
-        const loadSupportUnreadCount = async () => { try { const data = await api('/api/support/unread_count'); supportUnreadCount.value = data.unread_count; } catch (e) {} };
-        const createInvite = async () => { try { const data = await api('/api/invite/create', { method: 'POST' }); inviteUrl.value = data.invite_url; showInviteModal.value = true; await loadConvos(); } catch (e) { showToast(e.message, 'error'); } };
-        const copyInvite = async () => { try { await navigator.clipboard.writeText(inviteUrl.value); showToast('Copied!'); showInviteModal.value = false; } catch (e) { showToast('Failed to copy', 'error'); } };
-        
-        const openConvo = async (c) => { 
-            currentConvo.value = c; 
-            messages.value = []; 
-            typingUsers.value = {}; 
-            view.value = 'chat'; 
-            subscribeToConversation(c.id); 
-            await loadMessages(); 
-            if (!pusher.value) startPolling(); 
-        };
-        
-        const goBack = async () => { 
-            stopPolling(); 
-            if (currentChannel.value && pusher.value) pusher.value.unsubscribe(currentChannel.value.name);
-            currentChannel.value = null; 
-            view.value = 'convos'; 
-            await loadConvos(); 
-        };
-        
-        const loadMessages = async () => { try { const data = await api('/api/messages?convo_id=' + currentConvo.value.id); messages.value = data.messages; await nextTick(); scrollToBottom(); await markRead(); } catch (e) { showToast('Failed to load messages', 'error'); } };
-        
-        const sendMessage = async () => { 
-            const body = messageInput.value.trim(); 
-            if (!body) return; 
-            messageInput.value = ''; 
-            try { 
-                const payload = { convo_id: currentConvo.value.id, body };
-                if (pusherSocketId.value) payload.socket_id = pusherSocketId.value;
-                const result = await api('/api/messages/send', { method: 'POST', body: JSON.stringify(payload) }); 
-                messages.value.push({
-                    id: result.message_id,
-                    convo_id: currentConvo.value.id,
-                    user_id: user.value.id,
-                    username: user.value.username,
-                    is_verified: user.value.is_verified,
-                    body: body,
-                    created_at: new Date().toISOString().replace('T', ' ').substring(0, 19),
-                    is_delivered: false,
-                    is_read_by_other: false,
-                    is_mine: true
-                });
-                await nextTick();
-                scrollToBottom();
-            } catch (e) { messageInput.value = body; showToast(e.message, 'error'); } 
-        };
-
-        const sendLike = async () => {
-            if (!currentConvo.value?.id) return;
-            if (messageInput.value.trim()) return sendMessage();
-            messageInput.value = '👍';
-            await sendMessage();
-        };
-        
-        const markRead = async () => { 
-            const unread = messages.value.filter(m => !m.is_mine); 
-            if (unread.length === 0) return; 
-            const lastId = Math.max(...unread.map(m => m.id)); 
-            try { 
-                const payload = { convo_id: currentConvo.value.id, up_to_message_id: lastId };
-                if (pusherSocketId.value) payload.socket_id = pusherSocketId.value;
-                await api('/api/messages/mark_read', { method: 'POST', body: JSON.stringify(payload) }); 
-            } catch (e) {} 
-        };
-        
-        const scrollToBottom = () => { if (messagesContainer.value) messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight; };
-        
-        const startPolling = () => { 
-            stopPolling(); 
-            pollInterval = setInterval(async () => { 
-                if (view.value !== 'chat' || !currentConvo.value) return; 
-                try { 
-                    const lastId = messages.value.length ? Math.max(...messages.value.map(m => m.id)) : 0; 
-                    const data = await api('/api/poll?convo_id=' + currentConvo.value.id + '&last_id=' + lastId); 
-                    if (data.messages?.length) { 
-                        const existingIds = new Set(messages.value.map(m => m.id)); 
-                        const newMsgs = data.messages.filter(m => !existingIds.has(m.id)); 
-                        if (newMsgs.length) { 
-                            messages.value.push(...newMsgs); 
-                            await nextTick(); 
-                            scrollToBottom(); 
-                            await markRead(); 
-                        } 
-                    } 
-                    if (data.status_updates) data.status_updates.forEach(u => { const msg = messages.value.find(m => m.id === u.id); if (msg) { msg.is_delivered = u.is_delivered; msg.is_read_by_other = u.is_read_by_other; } }); 
-                    if (data.deleted_ids?.length) { const deletedSet = new Set(data.deleted_ids); messages.value = messages.value.filter(m => !deletedSet.has(m.id)); } 
-                } catch (e) {} 
-            }, 2000); 
-        };
-        
-        const stopPolling = () => { 
-            if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
-            if (statusPollInterval) { clearInterval(statusPollInterval); statusPollInterval = null; }
-        };
-
-        const submitReport = async () => { if (!reportReason.value.trim()) return; try { await api('/api/report', { method: 'POST', body: JSON.stringify({ reported_user_id: currentConvo.value.other_user_id, reason: reportReason.value.trim() }) }); showToast('Report submitted'); showReportModal.value = false; reportReason.value = ''; } catch (e) { showToast(e.message, 'error'); } };
-        const increaseFontScale = async () => { const newScale = Math.min(1.4, fontScale.value + 0.05); fontScale.value = newScale; try { await api('/api/user/font_scale', { method: 'POST', body: JSON.stringify({ scale: newScale }) }); } catch (e) { showToast(e.message, 'error'); } };
-        const decreaseFontScale = async () => { const newScale = Math.max(0.85, fontScale.value - 0.05); fontScale.value = newScale; try { await api('/api/user/font_scale', { method: 'POST', body: JSON.stringify({ scale: newScale }) }); } catch (e) { showToast(e.message, 'error'); } };
-        const updateFont = async () => { try { const data = await api('/api/user/font', { method: 'POST', body: JSON.stringify({ font_id: selectedFontId.value }) }); currentFont.value = data.font; showToast('Font updated'); } catch (e) { showToast(e.message, 'error'); } };
-        const updateTheme = async () => { 
-            try { 
-                let themeId = selectedThemeId.value;
-                if (themeId !== null && themeId !== undefined && themeId !== '') { themeId = Number(themeId); if (isNaN(themeId) || themeId === 0) themeId = null; } else { themeId = null; }
-                const data = await api('/api/user/theme', { method: 'POST', body: JSON.stringify({ theme_id: themeId }) }); 
-                currentTheme.value = null; 
-                await nextTick();
-                if (data.theme) currentTheme.value = typeof data.theme === 'string' ? JSON.parse(data.theme) : data.theme;
-                showToast('Theme updated'); 
-            } catch (e) { showToast(e.message, 'error'); } 
-        };
-        const requestVerification = async () => { if (!verificationMessage.value.trim()) return; try { await api('/api/user/request_verification', { method: 'POST', body: JSON.stringify({ message: verificationMessage.value.trim() }) }); verificationRequestSent.value = true; showToast('Verification request submitted'); } catch (e) { showToast(e.message, 'error'); } };
-        const openSupport = async () => { showSupportPanel.value = true; try { const data = await api('/api/support'); supportMessages.value = data.messages; } catch (e) { showToast(e.message, 'error'); } };
-        const openSupportMessage = async (m) => { if (expandedSupportId.value === m.id) { expandedSupportId.value = null; return; } expandedSupportId.value = m.id; if (!m.is_read) { try { await api('/api/support/mark_read', { method: 'POST', body: JSON.stringify({ message_id: m.id }) }); m.is_read = true; supportUnreadCount.value = Math.max(0, supportUnreadCount.value - 1); } catch (e) {} } };
-        const loadReports = async () => { try { const data = await api('/api/admin/reports'); adminReports.value = data.reports; } catch (e) { showToast(e.message, 'error'); } };
-        const adminAction = async (reportId, action, duration) => { try { await api('/api/admin/reports/action', { method: 'POST', body: JSON.stringify({ report_id: reportId, action, duration }) }); await loadReports(); showToast('Action applied'); } catch (e) { showToast(e.message, 'error'); } };
-        const rejectReport = async (reportId) => { try { await api('/api/admin/reports/reject', { method: 'POST', body: JSON.stringify({ report_id: reportId }) }); await loadReports(); showToast('Report rejected'); } catch (e) { showToast(e.message, 'error'); } };
-        const loadBannedWords = async () => { try { const data = await api('/api/admin/banned_words'); bannedWords.value = data.banned_words; } catch (e) { showToast(e.message, 'error'); } };
-        const addBannedWord = async () => { if (!newWord.word.trim()) return; try { await api('/api/admin/banned_words/add', { method: 'POST', body: JSON.stringify(newWord) }); await loadBannedWords(); showToast('Word added'); newWord.word = ''; newWord.penalty_type = 'warn'; newWord.penalty_duration = 0; } catch (e) { showToast(e.message, 'error'); } };
-        const deleteBannedWord = async (id) => { try { await api('/api/admin/banned_words/delete', { method: 'POST', body: JSON.stringify({ id }) }); await loadBannedWords(); showToast('Word deleted'); } catch (e) { showToast(e.message, 'error'); } };
-        const loadUsers = async () => { try { const data = await api('/api/admin/users'); adminUsers.value = data.users; } catch (e) { showToast(e.message, 'error'); } };
-        const toggleVerified = async (u) => { try { await api('/api/admin/set_verified', { method: 'POST', body: JSON.stringify({ user_id: u.id, value: !u.is_verified }) }); u.is_verified = !u.is_verified; showToast(u.is_verified ? 'User verified' : 'User unverified'); } catch (e) { showToast(e.message, 'error'); } };
-        const loadAdminThemes = async () => { try { const data = await api('/api/admin/themes'); adminThemes.value = data.themes; } catch (e) { showToast(e.message, 'error'); } };
-        const createTheme = async () => { if (!newTheme.name.trim() || !newTheme.definition_json.trim()) return; try { await api('/api/admin/themes/create', { method: 'POST', body: JSON.stringify(newTheme) }); await loadAdminThemes(); await loadAvailableThemes(); showToast('Theme created'); newTheme.name = ''; newTheme.definition_json = ''; } catch (e) { showToast(e.message, 'error'); } };
-        const activateTheme = async (themeId) => { try { await api('/api/admin/themes/activate', { method: 'POST', body: JSON.stringify({ theme_id: themeId }) }); await loadAdminThemes(); await loadAvailableThemes(); showToast('Theme activated'); } catch (e) { showToast(e.message, 'error'); } };
-        const deactivateTheme = async (themeId) => { try { await api('/api/admin/themes/deactivate', { method: 'POST', body: JSON.stringify({ theme_id: themeId }) }); await loadAdminThemes(); await loadAvailableThemes(); showToast('Theme deactivated'); } catch (e) { showToast(e.message, 'error'); } };
-        const deleteTheme = async (themeId) => { try { await api('/api/admin/themes/delete', { method: 'POST', body: JSON.stringify({ theme_id: themeId }) }); await loadAdminThemes(); await loadAvailableThemes(); showToast('Theme deleted'); } catch (e) { showToast(e.message, 'error'); } };
-        const loadAdminFonts = async () => { try { const data = await api('/api/admin/fonts'); availableFonts.value = data.fonts; } catch (e) { showToast(e.message, 'error'); } };
-        const createFont = async () => { if (!newFont.name.trim() || !newFont.css_value.trim()) return; try { await api('/api/admin/fonts/add', { method: 'POST', body: JSON.stringify(newFont) }); await loadAdminFonts(); showToast('Font added'); newFont.name = ''; newFont.css_value = ''; newFont.import_url = ''; } catch (e) { showToast(e.message, 'error'); } };
-        const deleteFont = async (id) => { if (!confirm('Delete this font?')) return; try { await api('/api/admin/fonts/delete', { method: 'POST', body: JSON.stringify({ id }) }); await loadAdminFonts(); showToast('Font deleted'); } catch (e) { showToast(e.message, 'error'); } };
-        const loadVerificationRequests = async () => { try { const data = await api('/api/admin/verification_requests'); verificationRequests.value = data.requests; } catch (e) { showToast(e.message, 'error'); } };
-        const approveVerification = async (requestId) => { try { await api('/api/admin/verification_requests/approve', { method: 'POST', body: JSON.stringify({ request_id: requestId }) }); await loadVerificationRequests(); showToast('Approved'); } catch (e) { showToast(e.message, 'error'); } };
-        const rejectVerification = async (requestId) => { try { await api('/api/admin/verification_requests/reject', { method: 'POST', body: JSON.stringify({ request_id: requestId }) }); await loadVerificationRequests(); showToast('Rejected'); } catch (e) { showToast(e.message, 'error'); } };
-        const loadAdminSupport = async () => { try { const data = await api('/api/admin/support/list'); adminSupportMessages.value = data.messages; } catch (e) { showToast(e.message, 'error'); } };
-        const sendSupportMessage = async () => { if (!newSupportMessage.title.trim() || !newSupportMessage.body.trim()) return; try { await api('/api/admin/support/send', { method: 'POST', body: JSON.stringify(newSupportMessage) }); await loadAdminSupport(); showToast('Sent'); newSupportMessage.title = ''; newSupportMessage.body = ''; } catch (e) { showToast(e.message, 'error'); } };
-
-        onMounted(() => { 
-            const params = new URLSearchParams(window.location.search); 
-            const invite = params.get('invite'); 
-            if (invite) { localStorage.setItem('pending_invite', invite); window.history.replaceState({}, '', window.location.pathname); } 
-            tryRefresh(); 
-        });
-        
-        onUnmounted(() => { 
-            stopPolling(); 
-            if (refreshTimeout) clearTimeout(refreshTimeout); 
-            if (toastTimeout) clearTimeout(toastTimeout); 
-            if (pusher.value) pusher.value.disconnect(); 
-        });
-
-        return { 
-            view, user, convos, currentConvo, messages, messageInput, messagesContainer, 
-            authTab, authForm, authError, authLoading, showInviteModal, inviteUrl, showReportModal, 
-            reportReason, showSettingsPanel, fontScale, selectedFontId, currentFont, availableFonts,
-            selectedThemeId, currentTheme, availableThemes, verificationMessage, verificationRequestSent, 
-            showSupportPanel, supportMessages, supportUnreadCount, expandedSupportId, showAdminPanel, 
-            adminTab, adminReports, bannedWords, adminUsers, adminThemes, verificationRequests, 
-            adminSupportMessages, newWord, newTheme, newFont, newSupportMessage, toast, 
-            typingIndicator, activeStatus, formatTime, handleAuth, logout, createInvite, 
-            copyInvite, openConvo, goBack, sendMessage, sendLike, submitReport, increaseFontScale, 
-            decreaseFontScale, updateFont, updateTheme, requestVerification, openSupport, 
-            openSupportMessage, loadReports, adminAction, rejectReport, loadBannedWords, 
-            addBannedWord, deleteBannedWord, loadUsers, toggleVerified, loadAdminThemes, 
-            createTheme, activateTheme, deactivateTheme, deleteTheme, loadAdminFonts, createFont,
-            deleteFont, loadVerificationRequests, approveVerification, rejectVerification, 
-            loadAdminSupport, sendSupportMessage, handleTyping, showToast
-        };
-    }
-}).mount('#app');
-</script>
+        })();
+    </script>
 </body>
+
 </html>
