@@ -190,6 +190,15 @@ function initDb(): void
         FOREIGN KEY(message_id) REFERENCES messages(id) ON DELETE CASCADE,
         FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     )");
+    $db->exec("CREATE TABLE IF NOT EXISTS message_reactions(
+        message_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        reaction TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY(message_id, user_id),
+        FOREIGN KEY(message_id) REFERENCES messages(id) ON DELETE CASCADE,
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    )");
     $db->exec("CREATE TABLE IF NOT EXISTS refresh_tokens(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
@@ -673,6 +682,33 @@ function validateHttpMethod(string $actualMethod, array $allowedMethods): void
         echo json_encode(['error' => 'Method Not Allowed', 'allowed_methods' => $allowedMethods]);
         exit;
     }
+}
+
+function attachReactionsToMessages(PDO $db, array $messages): array
+{
+    if (empty($messages)) return [];
+    $msgIds = array_column($messages, 'id');
+    $placeholders = implode(',', array_fill(0, count($msgIds), '?'));
+
+    // Fetch all reactions for these messages
+    $stmt = $db->prepare("SELECT * FROM message_reactions WHERE message_id IN ($placeholders)");
+    $stmt->execute($msgIds);
+    $allReactions = $stmt->fetchAll();
+
+    // Group by message_id
+    $grouped = [];
+    foreach ($allReactions as $r) {
+        $grouped[$r['message_id']][] = [
+            'user_id' => (int)$r['user_id'],
+            'reaction' => $r['reaction']
+        ];
+    }
+
+    // Attach to messages
+    foreach ($messages as &$m) {
+        $m['reactions'] = $grouped[$m['id']] ?? [];
+    }
+    return $messages;
 }
 
 function handleApi(): void
@@ -1165,7 +1201,8 @@ function handleApi(): void
             $placeholders = implode(',', array_fill(0, count($idsToMarkDelivered), '?'));
             $db->prepare("UPDATE messages SET delivered_at = datetime('now') WHERE id IN ($placeholders)")->execute($idsToMarkDelivered);
         }
-        jsonResponse(['messages' => $result]);
+        $resultWithReactions = attachReactionsToMessages($db, $result);
+        jsonResponse(['messages' => $resultWithReactions]);
     }
 
     if ($path === '/api/messages/send' && $method === 'POST') {
@@ -1244,6 +1281,50 @@ function handleApi(): void
         jsonResponse(['success' => true]);
     }
 
+    if ($path === '/api/messages/react' && $method === 'POST') {
+        $user = requireAuth();
+        $messageId = (int)($input['message_id'] ?? 0);
+        $reaction = $input['reaction'] ?? ''; // Emoji string
+
+        if ($messageId <= 0) jsonResponse(['error' => 'Invalid message'], 400);
+
+        $db = getDb();
+        // Verify access to message via conversation membership
+        $stmt = $db->prepare("
+            SELECT m.convo_id FROM messages m 
+            JOIN convo_members cm ON m.convo_id = cm.convo_id 
+            WHERE m.id = ? AND cm.user_id = ?
+        ");
+        $stmt->execute([$messageId, $user['id']]);
+        $row = $stmt->fetch();
+
+        if (!$row) jsonResponse(['error' => 'Forbidden'], 403);
+        $convoId = (int)$row['convo_id'];
+
+        if (!$reaction) {
+            // Remove reaction
+            $db->prepare("DELETE FROM message_reactions WHERE message_id = ? AND user_id = ?")
+                ->execute([$messageId, $user['id']]);
+        } else {
+            // Add/Update reaction
+            $db->prepare("INSERT OR REPLACE INTO message_reactions(message_id, user_id, reaction) VALUES(?, ?, ?)")
+                ->execute([$messageId, $user['id'], $reaction]);
+        }
+
+        // Trigger Pusher
+        triggerPusherEvent(
+            "private-conversation-{$convoId}",
+            'message-reaction',
+            [
+                'message_id' => $messageId,
+                'user_id' => (int)$user['id'],
+                'reaction' => $reaction
+            ]
+        );
+
+        jsonResponse(['success' => true]);
+    }
+
     if ($path === '/api/poll' && $method === 'GET') {
         $user = requireAuth();
         $convoId = (int)($_GET['convo_id'] ?? 0);
@@ -1301,7 +1382,13 @@ function handleApi(): void
         $partnerStatus = $stmt->fetch();
         $lastActive = $partnerStatus ? $partnerStatus['last_active_at'] : null;
 
-        jsonResponse(['messages' => $result, 'status_updates' => $statusUpdates, 'deleted_ids' => $deletedIds, 'partner_last_active' => $lastActive]);
+        $resultWithReactions = attachReactionsToMessages($db, $result);
+        jsonResponse([
+            'messages' => $resultWithReactions,
+            'status_updates' => $statusUpdates,
+            'deleted_ids' => $deletedIds,
+            'partner_last_active' => $lastActive
+        ]);
     }
 
     if ($path === '/api/report' && $method === 'POST') {
@@ -1757,7 +1844,7 @@ if (strpos($uri, '/api/') !== false) {
 }
 
 $nonce = base64_encode(random_bytes(16));
-header("Content-Security-Policy: default-src 'self'; script-src 'nonce-$nonce' 'unsafe-eval' https://cdn.jsdelivr.net https://js.pusher.com; style-src 'nonce-$nonce' 'unsafe-inline' https:; font-src https: data:; img-src 'self' data:; connect-src 'self' wss://*.pusher.com https://sockjs.pusher.com https://*.pusher.com; frame-ancestors 'none'");
+header("Content-Security-Policy: default-src 'self'; script-src 'nonce-$nonce' 'unsafe-eval' https://cdn.jsdelivr.net https://js.pusher.com https://unpkg.com; style-src 'nonce-$nonce' 'unsafe-inline' https:; font-src https: data:; img-src 'self' data: https://unpkg.com https://twemoji.maxcdn.com; connect-src 'self' wss://*.pusher.com https://sockjs.pusher.com https://*.pusher.com; frame-ancestors 'none'");
 header("X-Content-Type-Options: nosniff");
 header("X-Frame-Options: DENY");
 ?>
@@ -1866,6 +1953,209 @@ header("X-Frame-Options: DENY");
             --text: var(--app-text-color, #111827);
             --accent: var(--app-accent-color, #1877F2);
             --font: var(--app-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif);
+        }
+
+        /* Twemoji Styles */
+        img.emoji {
+            height: 1.2em;
+            width: 1.2em;
+            margin: 0 .05em 0 .1em;
+            vertical-align: -0.2em;
+            pointer-events: none;
+        }
+
+        /* Reaction Picker (Floating Pill) */
+        .reaction-picker {
+            position: absolute;
+            bottom: 100%;
+            right: 0;
+            background: var(--bg);
+            border: 1px solid var(--divider);
+            border-radius: 50px;
+            padding: 4px;
+            display: flex;
+            gap: 4px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            z-index: 10;
+            margin-bottom: 8px;
+            animation: popIn 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        .incoming .reaction-picker {
+            right: auto;
+            left: 0;
+        }
+
+        .reaction-option {
+            font-size: 20px;
+            padding: 4px 8px;
+            cursor: pointer;
+            transition: transform 0.1s;
+            user-select: none;
+        }
+
+        .reaction-option:hover {
+            transform: scale(1.3);
+        }
+
+        @keyframes popIn {
+            from {
+                opacity: 0;
+                transform: scale(0.8) translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: scale(1) translateY(0);
+            }
+        }
+
+        /* ========================================
+           BUBBLE FIXES & EMOJI STYLES
+           ======================================== */
+
+        /* Wrapper to stack Bubble + Time vertically */
+        .bubble-group {
+            display: flex;
+            flex-direction: column;
+            max-width: 100%;
+            /* Ensure it doesn't overflow */
+        }
+
+        .incoming .bubble-group {
+            align-items: flex-start;
+        }
+
+        .outgoing .bubble-group {
+            align-items: flex-end;
+        }
+
+        .message-bubble {
+            /* Fix for "width not content aware" */
+            width: -webkit-fit-content;
+            width: -moz-fit-content;
+            width: fit-content !important;
+            min-width: auto !important;
+            /* Allow small bubbles */
+            max-width: 100% !important;
+            /* Let parent control max width */
+            display: block;
+            /* Ensure text wraps normally */
+
+            /* Improve visual roundness */
+            border-radius: 20px;
+        }
+
+        /* Time & Status outside the bubble */
+        .message-meta {
+            font-size: 11px;
+            color: var(--text-tertiary);
+            margin-top: 2px;
+            margin-bottom: 2px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            opacity: 0.7;
+            /* Subtle look */
+            padding: 0 4px;
+        }
+
+        /* Emoji-Only Message Styles */
+        .message-bubble.emoji-msg {
+            background: transparent !important;
+            box-shadow: none !important;
+            padding: 0 !important;
+            margin-bottom: 0;
+            /* FIX: Removed negative margin to prevent overlap */
+            line-height: 1.2;
+            /* Optional: Ensure line-height prevents clipping */
+        }
+
+        .message-bubble.emoji-msg .message-text {
+            font-size: 40px !important;
+            /* Large Emoji */
+            line-height: 1.1;
+        }
+
+        /* Hide timestamp for emoji messages to keep it clean (Optional) */
+        .message-bubble.emoji-msg .message-time {
+            display: none;
+        }
+
+        /* Reaction Display on Message Bubble */
+        .message-bubble {
+            position: relative;
+        }
+
+        .message-reactions {
+            position: absolute;
+            bottom: -10px;
+            right: 0;
+            background: var(--bg);
+            border: 1px solid var(--divider);
+            border-radius: 10px;
+            padding: 2px 6px;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 2px;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+            z-index: 5;
+            cursor: pointer;
+        }
+
+        .incoming .message-reactions {
+            right: auto;
+            left: 0;
+        }
+
+        .reaction-count {
+            color: var(--text-secondary);
+            font-size: 11px;
+            margin-left: 2px;
+        }
+
+        /* Reaction Trigger Button */
+        .reaction-trigger-btn {
+            opacity: 0;
+            transition: opacity 0.2s;
+            padding: 8px;
+            /* Increased padding */
+            cursor: pointer;
+            color: var(--text-tertiary);
+            display: flex;
+            align-items: center;
+            z-index: 10;
+            /* Ensure it's on top */
+            margin-bottom: 22px;
+            /* FIX: Lift the button up to offset the timestamp height */
+        }
+
+        .message-row:hover .reaction-trigger-btn,
+        .message-row.reaction-active .reaction-trigger-btn {
+            opacity: 1;
+        }
+
+        /* Always show on touch devices */
+        @media (hover: none) {
+            .reaction-trigger-btn {
+                opacity: 1;
+            }
+        }
+
+        .message-content-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            position: relative;
+        }
+
+        .incoming .message-content-wrapper {
+            flex-direction: row;
+        }
+
+        .outgoing .message-content-wrapper {
+            flex-direction: row-reverse;
         }
 
         /* ========================================
@@ -3714,9 +4004,10 @@ header("X-Frame-Options: DENY");
                                     <div class="chat-name-row">
                                         <span class="chat-name">{{ c.other_username || 'Waiting...' }}</span>
                                         <span v-if="c.other_verified" class="verified-badge">
-                                            <svg viewBox="0 0 24 24">
-                                                <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z" />
+                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="size-6">
+                                                <path fill-rule="evenodd" d="M8.603 3.799A4.49 4.49 0 0 1 12 2.25c1.357 0 2.573.6 3.397 1.549a4.49 4.49 0 0 1 3.498 1.307 4.491 4.491 0 0 1 1.307 3.497A4.49 4.49 0 0 1 21.75 12a4.49 4.49 0 0 1-1.549 3.397 4.491 4.491 0 0 1-1.307 3.497 4.491 4.491 0 0 1-3.497 1.307A4.49 4.49 0 0 1 12 21.75a4.49 4.49 0 0 1-3.397-1.549 4.49 4.49 0 0 1-3.498-1.306 4.491 4.491 0 0 1-1.307-3.498A4.49 4.49 0 0 1 2.25 12c0-1.357.6-2.573 1.549-3.397a4.49 4.49 0 0 1 1.307-3.497 4.49 4.49 0 0 1 3.497-1.307Zm7.007 6.387a.75.75 0 1 0-1.22-.872l-3.236 4.53L9.53 12.22a.75.75 0 0 0-1.06 1.06l2.25 2.25a.75.75 0 0 0 1.14-.094l3.75-5.25Z" clip-rule="evenodd" />
                                             </svg>
+
                                         </span>
                                     </div>
                                     <div class="chat-preview">Tap to open conversation</div>
@@ -3751,9 +4042,10 @@ header("X-Frame-Options: DENY");
                                 <div class="chat-header-name">
                                     <span>{{ currentConvo ? currentConvo.other_username : 'Chat' }}</span>
                                     <span v-if="currentConvo && currentConvo.other_verified" class="verified-badge">
-                                        <svg viewBox="0 0 24 24">
-                                            <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z" />
+                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="size-6">
+                                            <path fill-rule="evenodd" d="M8.603 3.799A4.49 4.49 0 0 1 12 2.25c1.357 0 2.573.6 3.397 1.549a4.49 4.49 0 0 1 3.498 1.307 4.491 4.491 0 0 1 1.307 3.497A4.49 4.49 0 0 1 21.75 12a4.49 4.49 0 0 1-1.549 3.397 4.491 4.491 0 0 1-1.307 3.497 4.491 4.491 0 0 1-3.497 1.307A4.49 4.49 0 0 1 12 21.75a4.49 4.49 0 0 1-3.397-1.549 4.49 4.49 0 0 1-3.498-1.306 4.491 4.491 0 0 1-1.307-3.498A4.49 4.49 0 0 1 2.25 12c0-1.357.6-2.573 1.549-3.397a4.49 4.49 0 0 1 1.307-3.497 4.49 4.49 0 0 1 3.497-1.307Zm7.007 6.387a.75.75 0 1 0-1.22-.872l-3.236 4.53L9.53 12.22a.75.75 0 0 0-1.06 1.06l2.25 2.25a.75.75 0 0 0 1.14-.094l3.75-5.25Z" clip-rule="evenodd" />
                                         </svg>
+
                                     </span>
                                 </div>
                                 <div v-if="typingIndicator" class="chat-header-status">{{ typingIndicator }}</div>
@@ -3775,22 +4067,48 @@ header("X-Frame-Options: DENY");
                             <div class="empty-state-title">Start the conversation!</div>
                             <div class="empty-state-text">Send a message to begin</div>
                         </div>
-                        <div v-for="m in messages" v-bind:key="m.id" class="message-row" v-bind:class="{outgoing: m.is_mine, incoming: !m.is_mine}">
-                            <div class="message-bubble">
-                                <div class="message-text" v-bind:style="{fontSize: fontSizePx}">{{ m.body }}</div>
-                                <div class="message-time">
-                                    {{ formatTime(m.created_at) }}
-                                    <span v-if="m.is_mine" class="message-status" v-bind:class="{read: m.is_read_by_other, delivered: m.is_delivered && !m.is_read_by_other, sent: !m.is_delivered}">
-                                        <svg v-if="m.is_read_by_other" viewBox="0 0 24 24">
-                                            <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z" />
-                                        </svg>
-                                        <svg v-else-if="m.is_delivered" viewBox="0 0 24 24">
-                                            <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41z" />
-                                        </svg>
-                                        <svg v-else viewBox="0 0 24 24">
-                                            <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
-                                        </svg>
-                                    </span>
+                        <div v-for="m in messages" v-bind:key="m.id" class="message-row" v-bind:class="{outgoing: m.is_mine, incoming: !m.is_mine, 'reaction-active': activeReactionMessageId === m.id}" @mouseleave="activeReactionMessageId = null">
+
+                            <div class="message-content-wrapper">
+
+                                <div class="bubble-group">
+
+                                    <div class="message-bubble" v-bind:class="{'bubble-incoming': !m.is_mine, 'bubble-outgoing': m.is_mine, 'emoji-msg': isOnlyEmoji(m.body)}">
+                                        <div class="message-text" v-bind:style="{fontSize: fontSizePx}">{{ m.body }}</div>
+
+                                        <div v-if="m.reactions && m.reactions.length > 0" class="message-reactions" v-on:click.stop="toggleReactionPicker(m)">
+                                            <span v-for="r in getUniqueReactions(m.reactions)" :key="r">{{ r }}</span>
+                                            <span class="reaction-count" v-if="m.reactions.length > 1">{{ m.reactions.length }}</span>
+                                        </div>
+
+                                        <div v-if="activeReactionMessageId === m.id" class="reaction-picker">
+                                            <div v-for="emoji in reactionEmojis" :key="emoji" class="reaction-option" v-on:click="reactToMessage(m, emoji)">
+                                                {{ emoji }}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="message-meta">
+                                        <span class="message-time-text">{{ formatTime(m.created_at) }}</span>
+
+                                        <span v-if="m.is_mine" class="message-status" v-bind:class="{read: m.is_read_by_other, delivered: m.is_delivered && !m.is_read_by_other, sent: !m.is_delivered}">
+                                            <svg v-if="m.is_read_by_other" viewBox="0 0 24 24" style="width:14px;height:14px;fill:currentColor;">
+                                                <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z" />
+                                            </svg>
+                                            <svg v-else-if="m.is_delivered" viewBox="0 0 24 24" style="width:14px;height:14px;fill:currentColor;">
+                                                <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41z" />
+                                            </svg>
+                                            <svg v-else viewBox="0 0 24 24" style="width:14px;height:14px;fill:currentColor;">
+                                                <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
+                                            </svg>
+                                        </span>
+                                    </div>
+
+                                </div>
+                                <div class="reaction-trigger-btn" v-on:click.stop="toggleReactionPicker(m)">
+                                    <svg viewBox="0 0 24 24" style="width:18px;height:18px;fill:currentColor;">
+                                        <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z" />
+                                    </svg>
                                 </div>
                             </div>
                         </div>
@@ -3874,9 +4192,10 @@ header("X-Frame-Options: DENY");
                                     <div class="chat-name-row">
                                         <span class="chat-name">{{ c.other_username || 'Waiting...' }}</span>
                                         <span v-if="c.other_verified" class="verified-badge">
-                                            <svg viewBox="0 0 24 24">
-                                                <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z" />
+                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="size-6">
+                                                <path fill-rule="evenodd" d="M8.603 3.799A4.49 4.49 0 0 1 12 2.25c1.357 0 2.573.6 3.397 1.549a4.49 4.49 0 0 1 3.498 1.307 4.491 4.491 0 0 1 1.307 3.497A4.49 4.49 0 0 1 21.75 12a4.49 4.49 0 0 1-1.549 3.397 4.491 4.491 0 0 1-1.307 3.497 4.491 4.491 0 0 1-3.497 1.307A4.49 4.49 0 0 1 12 21.75a4.49 4.49 0 0 1-3.397-1.549 4.49 4.49 0 0 1-3.498-1.306 4.491 4.491 0 0 1-1.307-3.498A4.49 4.49 0 0 1 2.25 12c0-1.357.6-2.573 1.549-3.397a4.49 4.49 0 0 1 1.307-3.497 4.49 4.49 0 0 1 3.497-1.307Zm7.007 6.387a.75.75 0 1 0-1.22-.872l-3.236 4.53L9.53 12.22a.75.75 0 0 0-1.06 1.06l2.25 2.25a.75.75 0 0 0 1.14-.094l3.75-5.25Z" clip-rule="evenodd" />
                                             </svg>
+
                                         </span>
                                     </div>
                                     <div class="chat-preview">Tap to open conversation</div>
@@ -3907,9 +4226,10 @@ header("X-Frame-Options: DENY");
                                         <div class="chat-header-name">
                                             <span>{{ currentConvo.other_username || 'Chat' }}</span>
                                             <span v-if="currentConvo.other_verified" class="verified-badge">
-                                                <svg viewBox="0 0 24 24">
-                                                    <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z" />
+                                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="size-6">
+                                                    <path fill-rule="evenodd" d="M8.603 3.799A4.49 4.49 0 0 1 12 2.25c1.357 0 2.573.6 3.397 1.549a4.49 4.49 0 0 1 3.498 1.307 4.491 4.491 0 0 1 1.307 3.497A4.49 4.49 0 0 1 21.75 12a4.49 4.49 0 0 1-1.549 3.397 4.491 4.491 0 0 1-1.307 3.497 4.491 4.491 0 0 1-3.497 1.307A4.49 4.49 0 0 1 12 21.75a4.49 4.49 0 0 1-3.397-1.549 4.49 4.49 0 0 1-3.498-1.306 4.491 4.491 0 0 1-1.307-3.498A4.49 4.49 0 0 1 2.25 12c0-1.357.6-2.573 1.549-3.397a4.49 4.49 0 0 1 1.307-3.497 4.49 4.49 0 0 1 3.497-1.307Zm7.007 6.387a.75.75 0 1 0-1.22-.872l-3.236 4.53L9.53 12.22a.75.75 0 0 0-1.06 1.06l2.25 2.25a.75.75 0 0 0 1.14-.094l3.75-5.25Z" clip-rule="evenodd" />
                                                 </svg>
+
                                             </span>
                                         </div>
                                         <div v-if="typingIndicator" class="chat-header-status">{{ typingIndicator }}</div>
@@ -3931,22 +4251,48 @@ header("X-Frame-Options: DENY");
                                     <div class="empty-state-title">Start the conversation!</div>
                                     <div class="empty-state-text">Send a message to begin</div>
                                 </div>
-                                <div v-for="m in messages" v-bind:key="m.id" class="message-row" v-bind:class="{outgoing: m.is_mine, incoming: !m.is_mine}">
-                                    <div class="message-bubble">
-                                        <div class="message-text" v-bind:style="{fontSize: fontSizePx}">{{ m.body }}</div>
-                                        <div class="message-time">
-                                            {{ formatTime(m.created_at) }}
-                                            <span v-if="m.is_mine" class="message-status" v-bind:class="{read: m.is_read_by_other, delivered: m.is_delivered && !m.is_read_by_other, sent: !m.is_delivered}">
-                                                <svg v-if="m.is_read_by_other" viewBox="0 0 24 24">
-                                                    <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z" />
-                                                </svg>
-                                                <svg v-else-if="m.is_delivered" viewBox="0 0 24 24">
-                                                    <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41z" />
-                                                </svg>
-                                                <svg v-else viewBox="0 0 24 24">
-                                                    <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
-                                                </svg>
-                                            </span>
+                                <div v-for="m in messages" v-bind:key="m.id" class="message-row" v-bind:class="{outgoing: m.is_mine, incoming: !m.is_mine, 'reaction-active': activeReactionMessageId === m.id}" @mouseleave="activeReactionMessageId = null">
+
+                                    <div class="message-content-wrapper">
+
+                                        <div class="bubble-group">
+
+                                            <div class="message-bubble" v-bind:class="{'bubble-incoming': !m.is_mine, 'bubble-outgoing': m.is_mine, 'emoji-msg': isOnlyEmoji(m.body)}">
+                                                <div class="message-text" v-bind:style="{fontSize: fontSizePx}">{{ m.body }}</div>
+
+                                                <div v-if="m.reactions && m.reactions.length > 0" class="message-reactions" v-on:click.stop="toggleReactionPicker(m)">
+                                                    <span v-for="r in getUniqueReactions(m.reactions)" :key="r">{{ r }}</span>
+                                                    <span class="reaction-count" v-if="m.reactions.length > 1">{{ m.reactions.length }}</span>
+                                                </div>
+
+                                                <div v-if="activeReactionMessageId === m.id" class="reaction-picker">
+                                                    <div v-for="emoji in reactionEmojis" :key="emoji" class="reaction-option" v-on:click="reactToMessage(m, emoji)">
+                                                        {{ emoji }}
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div class="message-meta">
+                                                <span class="message-time-text">{{ formatTime(m.created_at) }}</span>
+
+                                                <span v-if="m.is_mine" class="message-status" v-bind:class="{read: m.is_read_by_other, delivered: m.is_delivered && !m.is_read_by_other, sent: !m.is_delivered}">
+                                                    <svg v-if="m.is_read_by_other" viewBox="0 0 24 24" style="width:14px;height:14px;fill:currentColor;">
+                                                        <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z" />
+                                                    </svg>
+                                                    <svg v-else-if="m.is_delivered" viewBox="0 0 24 24" style="width:14px;height:14px;fill:currentColor;">
+                                                        <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41z" />
+                                                    </svg>
+                                                    <svg v-else viewBox="0 0 24 24" style="width:14px;height:14px;fill:currentColor;">
+                                                        <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
+                                                    </svg>
+                                                </span>
+                                            </div>
+
+                                        </div>
+                                        <div class="reaction-trigger-btn" v-on:click.stop="toggleReactionPicker(m)">
+                                            <svg viewBox="0 0 24 24" style="width:18px;height:18px;fill:currentColor;">
+                                                <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z" />
+                                            </svg>
                                         </div>
                                     </div>
                                 </div>
@@ -4361,6 +4707,8 @@ header("X-Frame-Options: DENY");
         }
     </script>
 
+    <script src="https://unpkg.com/twemoji@latest/dist/twemoji.min.js" crossorigin="anonymous"></script>
+
     <!-- Vue 2 Legacy Build -->
     <script nonce="<?php echo $nonce; ?>" src="https://cdn.jsdelivr.net/npm/vue@2.7.14/dist/vue.min.js"></script>
 
@@ -4444,6 +4792,10 @@ header("X-Frame-Options: DENY");
                     messages: [],
                     messageInput: '',
                     searchQuery: '',
+
+                    // Reactions
+                    activeReactionMessageId: null,
+                    reactionEmojis: ['👍', '❤️', '😂', '😮', '😢', '😠'],
 
                     // UI States
                     showInviteModal: false,
@@ -4570,8 +4922,10 @@ header("X-Frame-Options: DENY");
 
                     currentTheme: function(val) {
                         var root = document.documentElement;
-                        if (val && val.definition) {
-                            var t = val.definition;
+                        // Fix: Check if val is the definition itself or contains a .definition property
+                        var t = val ? (val.definition || val) : null;
+
+                        if (t && t.background) {
                             root.style.setProperty('--bg', t.background || '#FFFFFF');
                             root.style.setProperty('--bubble-incoming', t.incomingBubble || '#F0F2F5');
                             root.style.setProperty('--bubble-outgoing', t.outgoingBubble || '#1877F2');
@@ -4610,7 +4964,25 @@ header("X-Frame-Options: DENY");
                     }
                 },
 
+                updated: function() {
+                    this.parseEmojis();
+                },
+
                 methods: {
+                    isOnlyEmoji: function(text) {
+                        if (!text) return false;
+                        // Regex for Emoji-only strings (including spaces)
+                        var emojiRegex = /^(\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff]|\s)+$/gi;
+                        return emojiRegex.test(text) && text.trim().length > 0;
+                    },
+                    parseEmojis: function() {
+                        if (window.twemoji) {
+                            window.twemoji.parse(this.$el, {
+                                folder: 'svg',
+                                ext: '.svg'
+                            });
+                        }
+                    },
                     // Toast
                     showToast: function(message, type) {
                         var self = this;
@@ -4866,6 +5238,33 @@ header("X-Frame-Options: DENY");
                                     m.is_read_by_other = true;
                                 }
                             });
+                        });
+
+                        this.currentChannel.bind('message-reaction', function(data) {
+                            var msg = self.messages.find(function(m) {
+                                return m.id === data.message_id;
+                            });
+                            if (msg) {
+                                if (!msg.reactions) self.$set(msg, 'reactions', []);
+
+                                // Remove existing reaction by this user
+                                var idx = -1;
+                                for (var i = 0; i < msg.reactions.length; i++) {
+                                    if (msg.reactions[i].user_id === data.user_id) {
+                                        idx = i;
+                                        break;
+                                    }
+                                }
+                                if (idx !== -1) msg.reactions.splice(idx, 1);
+
+                                // Add new if not empty
+                                if (data.reaction) {
+                                    msg.reactions.push({
+                                        user_id: data.user_id,
+                                        reaction: data.reaction
+                                    });
+                                }
+                            }
                         });
 
                         this.currentChannel.bind('message-deleted', function(data) {
@@ -5273,6 +5672,74 @@ header("X-Frame-Options: DENY");
                         });
                     },
 
+                    toggleReactionPicker: function(msg) {
+                        if (this.activeReactionMessageId === msg.id) {
+                            this.activeReactionMessageId = null;
+                        } else {
+                            this.activeReactionMessageId = msg.id;
+                        }
+                    },
+
+                    getUniqueReactions: function(reactions) {
+                        if (!reactions) return [];
+                        // Return top 3 unique emojis
+                        var unique = [];
+                        reactions.forEach(function(r) {
+                            if (unique.indexOf(r.reaction) === -1) unique.push(r.reaction);
+                        });
+                        return unique.slice(0, 3);
+                    },
+
+                    reactToMessage: function(msg, emoji) {
+                        var self = this;
+                        this.activeReactionMessageId = null; // Close picker
+
+                        // Optimistic UI Update
+                        if (!msg.reactions) self.$set(msg, 'reactions', []);
+
+                        // Check if user already reacted with this emoji (toggle off)
+                        var existingIndex = -1;
+                        var existingReaction = null;
+
+                        for (var i = 0; i < msg.reactions.length; i++) {
+                            if (msg.reactions[i].user_id === self.user.id) {
+                                existingIndex = i;
+                                existingReaction = msg.reactions[i].reaction;
+                                break;
+                            }
+                        }
+
+                        if (existingIndex !== -1) {
+                            // User already has a reaction
+                            msg.reactions.splice(existingIndex, 1); // Remove it first
+                            if (existingReaction !== emoji) {
+                                // If different emoji, add the new one
+                                msg.reactions.push({
+                                    user_id: self.user.id,
+                                    reaction: emoji
+                                });
+                            } else {
+                                // If same emoji, we are toggling it off, so set emoji to empty for API
+                                emoji = '';
+                            }
+                        } else {
+                            // Add new reaction
+                            msg.reactions.push({
+                                user_id: self.user.id,
+                                reaction: emoji
+                            });
+                        }
+
+                        // Call API
+                        apiPost('/api/messages/react', {
+                            message_id: msg.id,
+                            reaction: emoji
+                        }, function(err) {
+                            if (err) self.showToast('Failed to react', 'error');
+                            // If error, we should revert UI (optional complexity)
+                        });
+                    },
+
                     // Support
                     openSupport: function() {
                         var self = this;
@@ -5526,6 +5993,7 @@ header("X-Frame-Options: DENY");
 
                 mounted: function() {
                     var self = this;
+                    this.parseEmojis();
 
                     // Handle resize
                     window.addEventListener('resize', function() {
