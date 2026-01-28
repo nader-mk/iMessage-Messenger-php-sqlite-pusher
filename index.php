@@ -35,6 +35,8 @@ define('APP_KEY', getenv('APP_KEY') ?: '');
 
 define('DATA_DIR', __DIR__ . '/data');
 if (!is_dir(DATA_DIR)) @mkdir(DATA_DIR, 0700, true);
+define('AVATAR_DIR', DATA_DIR . '/avatars');
+if (!is_dir(AVATAR_DIR)) @mkdir(AVATAR_DIR, 0700, true);
 define('DB_PATH', DATA_DIR . '/chat.sqlite');
 define('KEY_FILE', DATA_DIR . '/.encryption_key');
 define('KEY_LOCK_FILE', DATA_DIR . '/.encryption_key.lock');
@@ -155,6 +157,10 @@ function initDb(): void
     )");
     try {
         $db->exec("ALTER TABLE users ADD COLUMN last_active_at TEXT");
+    } catch (PDOException $e) {
+    }
+    try {
+        $db->exec("ALTER TABLE users ADD COLUMN avatar TEXT");
     } catch (PDOException $e) {
     }
     try {
@@ -841,6 +847,7 @@ function handleApi(): void
                 'id' => (int)$user['id'],
                 'username' => $user['username'],
                 'is_verified' => (bool)$user['is_verified'],
+                'avatar' => $user['avatar'] ? '/api/avatar?f=' . $user['avatar'] : null,
                 'is_admin' => (bool)$user['is_admin'],
                 'font_scale' => (float)($user['font_scale'] ?? 1.0),
                 'font_id' => $user['font_id'] ? (int)$user['font_id'] : 1,
@@ -894,6 +901,7 @@ function handleApi(): void
                             'id' => (int)$row['user_id'],
                             'username' => $row['username'],
                             'is_verified' => (bool)$row['is_verified'],
+                            'avatar' => $row['avatar'] ? '/api/avatar?f=' . $row['avatar'] : null,
                             'is_admin' => (bool)$row['is_admin'],
                             'font_scale' => (float)($row['font_scale'] ?? 1.0),
                             'font_id' => $row['font_id'] ? (int)$row['font_id'] : 1,
@@ -928,6 +936,7 @@ function handleApi(): void
                 'id' => (int)$row['user_id'],
                 'username' => $row['username'],
                 'is_verified' => (bool)$row['is_verified'],
+                'avatar' => $row['avatar'] ? '/api/avatar?f=' . $row['avatar'] : null,
                 'is_admin' => (bool)$row['is_admin'],
                 'font_scale' => (float)($row['font_scale'] ?? 1.0),
                 'font_id' => $row['font_id'] ? (int)$row['font_id'] : 1,
@@ -962,6 +971,7 @@ function handleApi(): void
             'id' => (int)$user['id'],
             'username' => $user['username'],
             'is_verified' => (bool)$user['is_verified'],
+            'avatar' => $user['avatar'] ? '/api/avatar?f=' . $user['avatar'] : null,
             'is_admin' => (bool)$user['is_admin'],
             'font_scale' => (float)($user['font_scale'] ?? 1.0),
             'font_family' => $user['font_family'] ?? 'system-ui',
@@ -1180,7 +1190,7 @@ function handleApi(): void
         $convos = $stmt->fetchAll();
         foreach ($convos as &$c) {
             $stmt = $db->prepare("
-                SELECT u.id, u.username, u.is_verified, u.last_active_at
+                SELECT u.id, u.username, u.is_verified, u.last_active_at, u.avatar
                 FROM convo_members cm
                 JOIN users u ON cm.user_id = u.id
                 WHERE cm.convo_id = ? AND cm.user_id != ?
@@ -1192,6 +1202,7 @@ function handleApi(): void
             $c['other_username'] = $other ? $other['username'] : null;
             $c['other_verified'] = $other ? (bool)$other['is_verified'] : false;
             $c['other_last_active'] = $other ? $other['last_active_at'] : null;
+            $c['other_avatar'] = ($other && $other['avatar']) ? '/api/avatar?f=' . $other['avatar'] : null;
             $stmt = $db->prepare("SELECT COUNT(*) as cnt FROM messages m 
                 LEFT JOIN message_reads mr ON m.id = mr.message_id AND mr.user_id = ?
                 WHERE m.convo_id = ? AND m.user_id != ? AND mr.message_id IS NULL AND m.deleted = 0");
@@ -1212,7 +1223,7 @@ function handleApi(): void
         if (!$stmt->fetch()) jsonResponse(['error' => 'Forbidden'], 403);
         $stmt = $db->prepare("
             SELECT m.id, m.convo_id, m.user_id, m.body_enc, m.nonce, m.created_at, m.delivered_at, m.type, m.attachment_id,
-                   u.username, u.is_verified,
+                   u.username, u.is_verified, u.avatar as user_avatar,
                    CASE WHEN mr.message_id IS NOT NULL THEN 1 ELSE 0 END as is_read_by_other,
                    m.reply_to_id,
                    parent.body_enc as reply_body_enc,
@@ -1237,7 +1248,9 @@ function handleApi(): void
                 $idsToMarkDelivered[] = $m['id'];
                 $m['delivered_at'] = gmdate('Y-m-d H:i:s');
             }
-            $result[] = formatMessage($m, (int)$user['id']);
+            $formatted = formatMessage($m, (int)$user['id']);
+            $formatted['avatar'] = !empty($m['user_avatar']) ? '/api/avatar?f=' . $m['user_avatar'] : null;
+            $result[] = $formatted;
         }
         if ($idsToMarkDelivered) {
             $placeholders = implode(',', array_fill(0, count($idsToMarkDelivered), '?'));
@@ -1247,6 +1260,65 @@ function handleApi(): void
         jsonResponse(['messages' => $resultWithReactions]);
     }
 
+    // --- Avatar Endpoints ---
+
+    if ($path === '/api/user/avatar_upload' && $method === 'POST') {
+        $user = requireAuth();
+
+        if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
+            jsonResponse(['error' => 'No file uploaded'], 400);
+        }
+
+        $file = $_FILES['file'];
+        $allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+        if (!in_array($file['type'], $allowed)) {
+            jsonResponse(['error' => 'Invalid file type. Only JPG, PNG, WEBP allowed'], 400);
+        }
+
+        // Generate unique filename
+        $ext = pathinfo($file['name'], PATHINFO_EXTENSION);
+        $filename = $user['id'] . '_' . time() . '.' . $ext;
+        $dest = AVATAR_DIR . '/' . $filename;
+
+        if (move_uploaded_file($file['tmp_name'], $dest)) {
+            // Optional: Delete old avatar to save space
+            if (!empty($user['avatar']) && file_exists(AVATAR_DIR . '/' . $user['avatar'])) {
+                @unlink(AVATAR_DIR . '/' . $user['avatar']);
+            }
+
+            $db = getDb();
+            $db->prepare("UPDATE users SET avatar = ? WHERE id = ?")->execute([$filename, $user['id']]);
+
+            // Return the full URL for frontend
+            jsonResponse([
+                'success' => true,
+                'avatar_url' => '/api/avatar?f=' . $filename
+            ]);
+        }
+        jsonResponse(['error' => 'Failed to save file'], 500);
+    }
+
+    if ($path === '/api/avatar' && $method === 'GET') {
+        $file = $_GET['f'] ?? '';
+        // Security: Prevent directory traversal
+        if (!$file || basename($file) !== $file || !file_exists(AVATAR_DIR . '/' . $file)) {
+            http_response_code(404);
+            exit;
+        }
+
+        $ext = pathinfo($file, PATHINFO_EXTENSION);
+        $mime = 'image/jpeg';
+        if ($ext === 'png') $mime = 'image/png';
+        if ($ext === 'webp') $mime = 'image/webp';
+        if ($ext === 'gif') $mime = 'image/gif';
+
+        header("Content-Type: $mime");
+        header("Cache-Control: public, max-age=86400"); // Cache for 1 day
+        readfile(AVATAR_DIR . '/' . $file);
+        exit;
+    }
+
+    // --- Message Actions ---
     if ($path === '/api/messages/send' && $method === 'POST') {
         $user = requireAuth();
         if ($user['mute_until'] && strtotime($user['mute_until']) > time()) {
@@ -2852,6 +2924,40 @@ header("X-Frame-Options: DENY");
             position: relative;
         }
 
+        .avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 50%;
+        }
+
+        .settings-avatar-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .settings-avatar {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: var(--bg-secondary);
+            margin-bottom: 12px;
+            overflow: hidden;
+            position: relative;
+            border: 2px solid var(--divider);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .settings-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
         .avatar-sm {
             width: 36px;
             height: 36px;
@@ -2933,7 +3039,7 @@ header("X-Frame-Options: DENY");
         }
 
         .chat-item.unread .chat-name {
-            font-weight: 700;
+            font-weight: bold;
         }
 
         .chat-item.unread .chat-preview {
@@ -2968,7 +3074,7 @@ header("X-Frame-Options: DENY");
 
         .chat-name {
             font-size: 15px;
-            font-weight: 500;
+            font-weight: bold;
             color: var(--text);
             white-space: nowrap;
             overflow: hidden;
@@ -4453,12 +4559,15 @@ header("X-Frame-Options: DENY");
                     <div v-if="activeUsers.length > 0" class="active-now">
                         <div class="active-now-title">Active Now</div>
                         <div class="active-now-scroll">
-                            <div v-for="u in activeUsers" v-bind:key="u.id" class="active-user" v-on:click="openConvoByUser(u)">
+                            <div v-for="u in activeUsers" v-bind:key="u.id" class="active-user" v-on:click="openConvo(u)">
                                 <div class="active-user-avatar">
-                                    <div class="avatar avatar-md">{{ getInitial(u.username) }}</div>
+                                    <div class="avatar avatar-md">
+                                        <img v-if="u.other_avatar" :src="u.other_avatar">
+                                        <span v-else>{{ getInitial(u.other_username) }}</span>
+                                    </div>
                                     <div class="online-dot online-dot-sm"></div>
                                 </div>
-                                <div class="active-user-name">{{ u.username }}</div>
+                                <div class="active-user-name">{{ u.other_username }}</div>
                             </div>
                         </div>
                     </div>
@@ -4474,7 +4583,9 @@ header("X-Frame-Options: DENY");
                             </div>
                             <div v-for="c in filteredConvos" v-bind:key="c.id" class="chat-item" v-bind:class="{unread: c.unread_count > 0}" v-on:click="openConvo(c)">
                                 <div class="chat-avatar">
-                                    <div class="avatar">{{ getInitial(c.other_username) }}
+                                    <div class="avatar">
+                                        <img v-if="c.other_avatar" :src="c.other_avatar">
+                                        <span v-else>{{ getInitial(c.other_username) }}</span>
                                         <div v-if="isUserOnline(c)" class="online-dot"></div>
                                     </div>
                                 </div>
@@ -4516,7 +4627,7 @@ header("X-Frame-Options: DENY");
                         <div class="chat-header-info">
                             <div class="chat-header-avatar">
                                 <div class="avatar avatar-sm">
-                                    <img v-if="currentConvo.avatar_url" :src="currentConvo.avatar_url" style="width:100%; height:100%; border-radius:50%;">
+                                    <img v-if="currentConvo.other_avatar" :src="currentConvo.other_avatar">
                                     <span v-else>{{ getInitial(currentConvo.other_username) }}</span>
                                 </div>
                             </div>
@@ -4553,7 +4664,8 @@ header("X-Frame-Options: DENY");
 
                             <div v-if="!m.is_mine" class="message-avatar" style="align-self: flex-end; margin-right: 8px; margin-bottom: 2px;">
                                 <div class="avatar avatar-sm" style="width: 28px; height: 28px;">
-                                    {{ getInitial(m.username) }}
+                                    <img v-if="m.avatar" :src="m.avatar">
+                                    <span v-else>{{ getInitial(m.username) }}</span>
                                 </div>
                             </div>
 
@@ -4735,7 +4847,9 @@ header("X-Frame-Options: DENY");
                             </div>
                             <div v-for="c in filteredConvos" v-bind:key="c.id" class="chat-item" v-bind:class="{active: currentConvo && currentConvo.id === c.id, unread: c.unread_count > 0}" v-on:click="openConvo(c)">
                                 <div class="chat-avatar">
-                                    <div class="avatar">{{ getInitial(c.other_username) }}
+                                    <div class="avatar">
+                                        <img v-if="c.other_avatar" :src="c.other_avatar">
+                                        <span v-else>{{ getInitial(c.other_username) }}</span>
                                         <div v-if="isUserOnline(c)" class="online-dot"></div>
                                     </div>
                                 </div>
@@ -4771,7 +4885,10 @@ header("X-Frame-Options: DENY");
                             <div class="chat-header">
                                 <div class="chat-header-info" style="padding-left: 12px;">
                                     <div class="chat-header-avatar">
-                                        <div class="avatar avatar-sm">{{ getInitial(currentConvo.other_username) }}</div>
+                                        <div class="avatar avatar-sm">
+                                            <img v-if="currentConvo.other_avatar" :src="currentConvo.other_avatar">
+                                            <span v-else>{{ getInitial(currentConvo.other_username) }}</span>
+                                        </div>
                                     </div>
                                     <div class="chat-header-text">
                                         <div class="chat-header-name">
@@ -4999,6 +5116,16 @@ header("X-Frame-Options: DENY");
                 <div class="settings-section">
                     <div class="settings-section-title">Account</div>
                     <div class="settings-card">
+                        <div class="settings-avatar-wrapper">
+                            <div class="settings-avatar">
+                                <img v-if="user && user.avatar" :src="user.avatar">
+                                <div v-else class="avatar" style="width: 100%; height: 100%; font-size: 32px;">{{ user ? getInitial(user.username) : '?' }}</div>
+                            </div>
+                            <button class="btn btn-secondary" v-on:click="$refs.avatarInput.click()">
+                                {{ user && user.avatar ? 'Change Photo' : 'Upload Photo' }}
+                            </button>
+                            <input type="file" ref="avatarInput" style="display: none" accept="image/*" v-on:change="handleAvatarUpload">
+                        </div>
                         <div class="settings-row">
                             <span class="settings-label">Username</span>
                             <span style="color: var(--text-secondary);">{{ user ? user.username : '' }}</span>
@@ -5896,6 +6023,38 @@ header("X-Frame-Options: DENY");
                                 self.messages.splice(idx, 1);
                             }
                         });
+                    },
+
+                    handleAvatarUpload: function(e) {
+                        var self = this;
+                        var file = e.target.files[0];
+                        if (!file) return;
+
+                        var formData = new FormData();
+                        formData.append('file', file);
+
+                        var xhr = new XMLHttpRequest();
+                        xhr.open('POST', '/api/user/avatar_upload', true);
+                        xhr.setRequestHeader('Authorization', 'Bearer ' + window._accessToken);
+
+                        xhr.onload = function() {
+                            if (xhr.status === 200) {
+                                try {
+                                    var res = JSON.parse(xhr.responseText);
+                                    if (res.success) {
+                                        self.user.avatar = res.avatar_url;
+                                        self.showToast('Profile photo updated');
+                                    } else {
+                                        self.showToast(res.error || 'Upload failed', 'error');
+                                    }
+                                } catch (e) {
+                                    self.showToast('Error parsing response', 'error');
+                                }
+                            } else {
+                                self.showToast('Upload failed', 'error');
+                            }
+                        };
+                        xhr.send(formData);
                     },
 
                     handleTyping: function() {
